@@ -1,0 +1,51 @@
+# --- Rust (любой crate в репозитории) ---
+**/target/
+**/*.rs.bk
+
+# --- Локальные секреты и окружение ---
+.env
+.env.*
+!.env.example
+
+# --- CMake / C++ (sfu и др.) ---
+**/build/
+**/cmake-build-*/
+**/out/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+**/*.a
+**/*.lib
+**/*.dll
+**/*.so
+**/*.dylib
+**/*.exe
+**/*.obj
+**/*.o
+**/*.pdb
+**/*.ilk
+**/.vs/
+**/.vscode/ipch/
+
+# --- vcpkg / conan (если появятся локально) ---
+vcpkg_installed/
+
+# --- Логи и временные файлы ---
+*.log
+*.tmp
+*.temp
+*.swp
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- IDE (личные настройки; при необходимости убери .idea/.vscode из ignore) ---
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates

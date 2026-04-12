@@ -1,0 +1,32 @@
+[package]
+name = "signaling"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.51", features = ["full"] }
+
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+axum = { version = "0.8", features = ["ws"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+uuid = { version = "1.23", features = ["v4", "serde"] }
+thiserror = "2.0"
+anyhow = "1"
+
+redis = { version = "1.2", features = ["tokio-comp", "connection-manager"] }
+
+tonic = "0.14"
+prost = "0.14"
+tonic-prost = "0.14"
+
+dotenv = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[build-dependencies]
+tonic-prost-build = "0.14"
+protoc-bin-vendored = "3"

@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+package sfu;
+
+// -----------------------------------------------------------------------------
+// Сервис SFU, который предоставляет Signaling сервер
+// -----------------------------------------------------------------------------
+service SFUService {
+    // --- Управление жизненным циклом пира (Signaling -> SFU) ---
+    // Вызывается, когда клиент подключился к Signaling и готов к звонку.
+    // SFU создаёт внутреннюю структуру Peer, но WebRTC соединение ещё не установлено.
+    rpc CreatePeer(CreatePeerRequest) returns (CreatePeerResponse);
+    
+    // Вызывается, когда клиент отключился от Signaling или покинул комнату.
+    // SFU закрывает PeerConnection и освобождает ресурсы.
+    rpc DeletePeer(DeletePeerRequest) returns (DeletePeerResponse);
+    
+    // --- WebRTC сигналинг (Signaling -> SFU) ---
+    // Signaling передаёт SDP offer/answer от клиента в SFU.
+    // SFU обрабатывает и возвращает ответный SDP (синхронно).
+    rpc HandleSDP(HandleSDPRequest) returns (HandleSDPResponse);
+    
+    // Signaling передаёт ICE кандидата от клиента в SFU.
+    rpc AddICECandidate(AddICECandidateRequest) returns (AddICECandidateResponse);
+    
+    // --- События от SFU к Signaling (server streaming) ---
+    // Signaling подписывается на этот стрим при старте.
+    // SFU через него отправляет все асинхронные события: потерю соединения, появление треков, ошибки.
+    rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SFUEvent);
+}
+
+// -----------------------------------------------------------------------------
+// Сообщения для управления пирами
+// -----------------------------------------------------------------------------
+message CreatePeerRequest {
+    string peer_id = 1; // Уникальный ID клиента (генерируется Signaling)
+    string room_id = 2; // ID комнаты
+    string signaling_id = 3;
+}
+
+message CreatePeerResponse {
+    bool success = 1;
+    optional string error_message = 2; // Если success=false
+}
+
+message DeletePeerRequest {
+    string peer_id = 1;
+    string reason = 2; // "user_left", "signaling_disconnected", etc.
+}
+
+message DeletePeerResponse {
+    bool success = 1;
+    optional string error_message = 2; // Если success=false
+}
+
+// -----------------------------------------------------------------------------
+// Сообщения для WebRTC сигналинга
+// -----------------------------------------------------------------------------
+enum SdpType {
+    SDP_TYPE_UNSPECIFIED = 0;
+    SDP_TYPE_OFFER = 1;
+    SDP_TYPE_ANSWER = 2;
+}
+
+message HandleSDPRequest {
+    string peer_id = 1;
+    string sdp = 2; // Полный SDP текст
+    SdpType type = 3; // offer или answer
+}
+
+message HandleSDPResponse {
+    string sdp = 1; // Ответный SDP (answer или offer)
+    SdpType type = 2; // answer или offer
+    bool success = 3;
+    optional string error_message = 4;
+}
+
+message AddICECandidateRequest {
+    string peer_id = 1;
+    string candidate = 2; // Строка ICE кандидата
+    string sdp_mid = 3;
+}
+
+message AddICECandidateResponse {
+    bool success = 1;
+    optional string error_message = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Подписка на события от SFU
+// -----------------------------------------------------------------------------
+message SubscribeEventsRequest {
+    // Можно передать идентификатор Signaling инстанса, если их несколько
+    string signaling_id = 1;
+}
+
+// -----------------------------------------------------------------------------
+// События, которые SFU отправляет Signaling (через server streaming)
+// -----------------------------------------------------------------------------
+message SFUEvent {
+    string peer_id = 1; // К кому относится событие
+    string room_id = 2;
+    
+    oneof event {
+        PeerConnectedEvent peer_connected = 3;
+        PeerDisconnectedEvent peer_disconnected = 4;
+        TrackAddedEvent track_added = 5;
+        TrackRemovedEvent track_removed = 6;
+        ICECandidateEvent ice_candidate = 7;
+        ErrorEvent error = 8;
+        HeartbeatEvent heartbeat = 9;
+    }
+}
+
+// Когда WebRTC соединение между SFU и клиентом полностью установлено (ICE done)
+// Signaling может оповестить других участников, что этот клиент готов получать/отправлять медиа.
+message PeerConnectedEvent {
+    string peer_id = 1;
+    string transport_type = 2; // "udp", "tcp", "relay"
+}
+
+// Когда SFU теряет WebRTC соединение с клиентом (ICE timeout, закрытие, сетевые проблемы)
+// Signaling должен оповестить остальных участников комнаты, что клиент отключился.
+message PeerDisconnectedEvent {
+    string peer_id = 1;
+    string reason = 2; // "timeout", "ice_failed", "closed", "network_error"
+}
+
+// Когда SFU получает новый медиа-трек от клиента (первый RTP пакет)
+// Signaling может использовать это для обновления информации об участнике (например, иконка камеры).
+message TrackAddedEvent {
+    string peer_id = 1;
+    string track_id = 2;
+    string kind = 3; // "video" или "audio"
+    string codec = 4; // "H264", "VP8", "Opus"
+    bool is_sending = 6; // true если клиент отправляет, false если только принимает
+}
+
+// Когда клиент перестаёт отправлять трек (выключил камеру/микрофон или закрыл дорожку)
+message TrackRemovedEvent {
+    string peer_id = 1;
+    string track_id = 2;
+    string kind = 3;
+    string reason = 4; // "user_muted", "track_ended", "peer_disconnected"
+}
+
+// Когда SFU генерирует ICE кандидата (в ответ на offer от клиента)
+// Signaling должен передать этого кандидата клиенту.
+message ICECandidateEvent {
+    string peer_id = 1;
+    string candidate = 2;
+    string sdp_mid = 3;
+}
+
+// Любая ошибка, которую SFU хочет сообщить Signaling (например, не удалось создать PeerConnection)
+message ErrorEvent {
+    string peer_id = 1;
+    string error_code = 2; // "NO_COMMON_CODEC", "ICE_FAILED", "RESOURCE_EXHAUSTED"
+    string error_message = 3;
+    bool is_fatal = 4; // Если true, клиент должен быть удалён
+}
+
+// Периодическое сообщение "я жив" от SFU к Signaling.
+// Signaling будет использовать для мониторинга здоровья SFU.
+message HeartbeatEvent {
+    int64 timestamp = 1; // Unix timestamp (секунды)
+    uint32 active_peers = 2; // Количество активных пиров на этом SFU
+    uint32 active_rooms = 3; // Количество комнат
+}
