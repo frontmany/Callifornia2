@@ -1,16 +1,22 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ServerErrorCode { 
+pub enum ServerErrorCode {
     InvalidJson,
     InvalidPayload,
-    NotImplemented,
     RoomNotFound,
     NicknameTaken,
+    Unauthorized,
+    SessionConflict,
+    AlreadyAuthorized,
+    LeaveRoomMismatch,
+    AlreadyInRoom,
     NotInRoom,
+    RoomNotReady,
+    TransferUnavailable,
     SfuUnavailable,
     Internal,
 }
@@ -18,29 +24,47 @@ pub enum ServerErrorCode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
+    Auth {
+        nickname: String,
+    },
+    Logout {
+        session_id: String,
+        participants: Option<Vec<String>>,
+    },
     Sdp {
+        session_id: String,
         sdp: String,
         sdp_type: String,
     },
     Candidate {
+        session_id: String,
         candidate: String,
         sdp_mid: String,
     },
     Create {
-        nickname: String,
+        session_id: String,
     },
     Join {
+        session_id: String,
         room_id: String,
-        nickname: String,
     },
     Leave {
+        session_id: String,
         room_id: String,
+        participants: Option<Vec<String>>,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    AuthOk {
+        nickname: String,
+        session_id: String,
+    },
+    LoggedOut {
+        nickname: String,
+    },
     Sdp {
         from: String,
         sdp: String,
@@ -60,6 +84,18 @@ pub enum ServerMessage {
         your_nickname: String,
         participants: Vec<String>,
     },
+    TransferRequired {
+        room_id: String,
+        target_host: String,
+        target_port: u16,
+    },
+    RoomClosed {
+        room_id: String,
+        reason: String,
+    },
+    Left {
+        room_id: String,
+    },
     ParticipantJoined {
         nickname: String,
     },
@@ -76,6 +112,8 @@ pub enum ServerMessage {
 pub enum ValidationError {
     #[error("nickname must be 3..32 characters and contain only letters, digits, '_' or '-'")]
     InvalidNickname,
+    #[error("session_id must be a valid UUID")]
+    InvalidSessionId,
     #[error("room_id must be a valid UUID")]
     InvalidRoomId,
     #[error("sdp must not be empty")]
@@ -89,14 +127,36 @@ pub enum ValidationError {
 impl ClientMessage {
     pub fn validate(&self) -> Result<(), ValidationError> {
         match self {
-            ClientMessage::Create { nickname } => validate_nickname(nickname),
-            ClientMessage::Join { room_id, nickname } => {
-                validate_room_id(room_id)?;
-                validate_nickname(nickname)
+            ClientMessage::Auth { nickname } => validate_nickname(nickname),
+            ClientMessage::Logout { session_id, .. } => validate_session_id(session_id),
+            ClientMessage::Create { session_id } => validate_session_id(session_id),
+            ClientMessage::Join {
+                session_id,
+                room_id,
+            } => {
+                validate_session_id(session_id)?;
+                validate_room_id(room_id)
             }
-            ClientMessage::Leave { room_id } => validate_room_id(room_id),
-            ClientMessage::Sdp { sdp, .. } => validate_sdp(sdp),
-            ClientMessage::Candidate { candidate, sdp_mid } => {
+            ClientMessage::Leave {
+                session_id,
+                room_id,
+                ..
+            } => {
+                validate_session_id(session_id)?;
+                validate_room_id(room_id)
+            }
+            ClientMessage::Sdp {
+                session_id, sdp, ..
+            } => {
+                validate_session_id(session_id)?;
+                validate_sdp(sdp)
+            }
+            ClientMessage::Candidate {
+                session_id,
+                candidate,
+                sdp_mid,
+            } => {
+                validate_session_id(session_id)?;
                 validate_candidate(candidate, sdp_mid)
             }
         }
@@ -124,6 +184,12 @@ fn validate_room_id(room_id: &str) -> Result<(), ValidationError> {
     Uuid::parse_str(room_id)
         .map(|_| ())
         .map_err(|_| ValidationError::InvalidRoomId)
+}
+
+fn validate_session_id(session_id: &str) -> Result<(), ValidationError> {
+    Uuid::parse_str(session_id)
+        .map(|_| ())
+        .map_err(|_| ValidationError::InvalidSessionId)
 }
 
 fn validate_sdp(sdp: &str) -> Result<(), ValidationError> {

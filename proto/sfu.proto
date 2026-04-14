@@ -27,6 +27,9 @@ service SFUService {
     // Signaling подписывается на этот стрим при старте.
     // SFU через него отправляет все асинхронные события: потерю соединения, появление треков, ошибки.
     rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SFUEvent);
+
+    // Лёгкий health-check для мониторинга доступности SFU.
+    rpc Ping(PingRequest) returns (PingResponse);
 }
 
 // -----------------------------------------------------------------------------
@@ -92,6 +95,12 @@ message AddICECandidateResponse {
 message SubscribeEventsRequest {
     // Можно передать идентификатор Signaling инстанса, если их несколько
     string signaling_id = 1;
+}
+
+message PingRequest {}
+
+message PingResponse {
+    bool ok = 1;
 }
 
 // -----------------------------------------------------------------------------

@@ -2,20 +2,23 @@ pub mod pb {
     tonic::include_proto!("sfu");
 }
 
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use pb::sfu_event::Event;
 use pb::sfu_service_client::SfuServiceClient;
 use pb::{
     AddIceCandidateRequest, CreatePeerRequest, DeletePeerRequest, HandleSdpRequest, SdpType,
-    SubscribeEventsRequest, SfuEvent,
+    SfuEvent, SubscribeEventsRequest,
 };
-use tonic::transport::Channel;
+use tokio::sync::RwLock;
+use tonic::transport::{Channel, Endpoint};
 use tracing::{debug, error, info, warn};
 
-use crate::app_state::AppState;
 use crate::message::{ServerErrorCode, ServerMessage};
 use crate::peer_registry::DeliveryStatus;
+use crate::state::State;
 
 const SFU_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
@@ -29,27 +32,42 @@ pub struct RemoteSdp {
 pub enum SfuClientError {
     #[error("SFU request failed")]
     Transport(#[from] tonic::Status),
+    #[error("failed to connect to SFU endpoint")]
+    Connect(#[from] tonic::transport::Error),
     #[error("{0}")]
     Rejected(String),
 }
 
 #[derive(Clone)]
-pub struct Client {
-    channel: Channel,
+pub struct Registry {
     signaling_id: String,
+    connect_timeout: Duration,
+    clients: Arc<RwLock<HashMap<String, Channel>>>,
+    listeners: Arc<RwLock<HashSet<String>>>,
 }
 
-impl Client {
-    pub fn new(channel: Channel, signaling_id: String) -> Self {
+impl Registry {
+    pub fn new(signaling_id: String, connect_timeout: Duration) -> Self {
         Self {
-            channel,
             signaling_id,
+            connect_timeout,
+            clients: Arc::new(RwLock::new(HashMap::new())),
+            listeners: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
-    pub async fn ensure_peer(&self, room_id: &str, nickname: &str) -> Result<(), SfuClientError> {
+    pub async fn ensure_peer(
+        &self,
+        state: &State,
+        sfu_addr: &str,
+        room_id: &str,
+        nickname: &str,
+    ) -> Result<(), SfuClientError> {
+        self.ensure_listener(state.clone(), sfu_addr.to_owned())
+            .await?;
         let response = self
-            .grpc_client()
+            .grpc_client(sfu_addr)
+            .await?
             .create_peer(CreatePeerRequest {
                 peer_id: peer_id(room_id, nickname),
                 room_id: room_id.to_owned(),
@@ -58,36 +76,47 @@ impl Client {
             .await?
             .into_inner();
 
-        ensure_success(response.success, response.error_message, "SFU failed to create peer")
+        ensure_success(
+            response.success,
+            response.error_message,
+            "SFU failed to create peer",
+        )
     }
 
     pub async fn delete_peer(
         &self,
+        sfu_addr: &str,
         room_id: &str,
         nickname: &str,
         reason: &str,
     ) -> Result<(), SfuClientError> {
         let response = self
-            .grpc_client()
+            .grpc_client(sfu_addr)
+            .await?
             .delete_peer(DeletePeerRequest {
                 peer_id: peer_id(room_id, nickname),
                 reason: reason.to_owned(),
             })
             .await?
             .into_inner();
-
-        ensure_success(response.success, response.error_message, "SFU failed to delete peer")
+        ensure_success(
+            response.success,
+            response.error_message,
+            "SFU failed to delete peer",
+        )
     }
 
     pub async fn handle_sdp(
         &self,
+        sfu_addr: &str,
         room_id: &str,
         nickname: &str,
         sdp: String,
         sdp_type: &str,
     ) -> Result<RemoteSdp, SfuClientError> {
         let response = self
-            .grpc_client()
+            .grpc_client(sfu_addr)
+            .await?
             .handle_sdp(HandleSdpRequest {
                 peer_id: peer_id(room_id, nickname),
                 sdp,
@@ -110,13 +139,15 @@ impl Client {
 
     pub async fn add_ice_candidate(
         &self,
+        sfu_addr: &str,
         room_id: &str,
         nickname: &str,
         candidate: String,
         sdp_mid: String,
     ) -> Result<(), SfuClientError> {
         let response = self
-            .grpc_client()
+            .grpc_client(sfu_addr)
+            .await?
             .add_ice_candidate(AddIceCandidateRequest {
                 peer_id: peer_id(room_id, nickname),
                 candidate,
@@ -132,31 +163,77 @@ impl Client {
         )
     }
 
-    pub async fn run_event_listener(&self, state: AppState) {
-        loop {
-            match self.subscribe_events_once(&state).await {
-                Ok(()) => warn!("SFU event stream closed, reconnecting"),
-                Err(err) => error!(error = %err, "SFU event stream failed"),
+    async fn grpc_client(
+        &self,
+        sfu_addr: &str,
+    ) -> Result<SfuServiceClient<Channel>, SfuClientError> {
+        let channel = self.channel_for(sfu_addr).await?;
+        Ok(SfuServiceClient::new(channel))
+    }
+
+    async fn channel_for(&self, sfu_addr: &str) -> Result<Channel, SfuClientError> {
+        if let Some(channel) = self.clients.read().await.get(sfu_addr).cloned() {
+            return Ok(channel);
+        }
+
+        let endpoint = Endpoint::from_shared(sfu_addr.to_owned())?
+            .connect_timeout(self.connect_timeout)
+            .tcp_nodelay(true);
+        let channel = endpoint.connect().await?;
+        self.clients
+            .write()
+            .await
+            .insert(sfu_addr.to_owned(), channel.clone());
+        Ok(channel)
+    }
+
+    async fn ensure_listener(&self, state: State, sfu_addr: String) -> Result<(), SfuClientError> {
+        {
+            let listeners = self.listeners.read().await;
+            if listeners.contains(&sfu_addr) {
+                return Ok(());
             }
+        }
+
+        self.listeners.write().await.insert(sfu_addr.clone());
+        let registry = self.clone();
+        tokio::spawn(async move {
+            registry.run_event_listener(state, sfu_addr).await;
+        });
+        Ok(())
+    }
+
+    async fn run_event_listener(&self, state: State, sfu_addr: String) {
+        loop {
+            match self.subscribe_events_once(&state, &sfu_addr).await {
+                Ok(()) => warn!(sfu_addr = %sfu_addr, "SFU event stream closed, reconnecting"),
+                Err(err) => error!(error = %err, sfu_addr = %sfu_addr, "SFU event stream failed"),
+            }
+
+            state
+                .close_rooms_due_to_sfu_addr(&sfu_addr, "sfu connection lost; room closed")
+                .await;
 
             tokio::time::sleep(SFU_RECONNECT_DELAY).await;
         }
     }
 
-    fn grpc_client(&self) -> SfuServiceClient<Channel> {
-        SfuServiceClient::new(self.channel.clone())
-    }
-
-    async fn subscribe_events_once(&self, state: &AppState) -> Result<(), tonic::Status> {
+    async fn subscribe_events_once(
+        &self,
+        state: &State,
+        sfu_addr: &str,
+    ) -> Result<(), tonic::Status> {
         let mut stream = self
-            .grpc_client()
+            .grpc_client(sfu_addr)
+            .await
+            .map_err(map_connect_error)?
             .subscribe_events(SubscribeEventsRequest {
                 signaling_id: self.signaling_id.clone(),
             })
             .await?
             .into_inner();
 
-        info!(signaling_id = %self.signaling_id, "Subscribed to SFU events");
+        info!(signaling_id = %self.signaling_id, sfu_addr = %sfu_addr, "Subscribed to SFU events");
 
         while let Some(event) = stream.message().await? {
             handle_sfu_event(state, event).await;
@@ -180,7 +257,15 @@ fn ensure_success(
     ))
 }
 
-async fn handle_sfu_event(state: &AppState, event: SfuEvent) {
+fn map_connect_error(err: SfuClientError) -> tonic::Status {
+    match err {
+        SfuClientError::Transport(status) => status,
+        SfuClientError::Connect(err) => tonic::Status::unavailable(err.to_string()),
+        SfuClientError::Rejected(message) => tonic::Status::failed_precondition(message),
+    }
+}
+
+async fn handle_sfu_event(state: &State, event: SfuEvent) {
     let SfuEvent {
         peer_id,
         room_id,
@@ -288,7 +373,7 @@ async fn handle_sfu_event(state: &AppState, event: SfuEvent) {
     }
 }
 
-async fn send_to_peer(state: &AppState, room_id: &str, peer_id: &str, payload: ServerMessage) {
+async fn send_to_peer(state: &State, room_id: &str, peer_id: &str, payload: ServerMessage) {
     let (_, Some(nickname)) = split_peer_id(peer_id) else {
         warn!(peer_id = %peer_id, "unable to route SFU event: invalid peer_id format");
         return;
@@ -311,7 +396,7 @@ async fn send_to_peer(state: &AppState, room_id: &str, peer_id: &str, payload: S
                     },
                 )
                 .await;
-            
+
             for stale_nickname in stale {
                 state
                     .detach_peer(room_id, &stale_nickname, "stale_sender")
@@ -322,7 +407,7 @@ async fn send_to_peer(state: &AppState, room_id: &str, peer_id: &str, payload: S
 }
 
 async fn broadcast_to_room(
-    state: &AppState,
+    state: &State,
     room_id: &str,
     except_nickname: Option<&str>,
     payload: ServerMessage,

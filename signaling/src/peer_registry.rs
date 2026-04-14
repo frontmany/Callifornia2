@@ -21,7 +21,12 @@ pub struct PeerRegistry {
 }
 
 impl PeerRegistry {
-    pub async fn register(&self, room_id: &str, nickname: &str, sender: UnboundedSender<ServerMessage>) {
+    pub async fn register(
+        &self,
+        room_id: &str,
+        nickname: &str,
+        sender: UnboundedSender<ServerMessage>,
+    ) {
         let mut peers = self.inner.write().await;
         peers
             .entry(room_id.to_owned())
@@ -41,7 +46,12 @@ impl PeerRegistry {
         }
     }
 
-    pub async fn send_to_peer(&self, room_id: &str, nickname: &str, payload: ServerMessage) -> DeliveryStatus {
+    pub async fn send_to_peer(
+        &self,
+        room_id: &str,
+        nickname: &str,
+        payload: ServerMessage,
+    ) -> DeliveryStatus {
         let sender = {
             let peers = self.inner.read().await;
             peers
@@ -88,5 +98,13 @@ impl PeerRegistry {
         }
 
         stale_nicknames
+    }
+
+    pub async fn snapshot_rooms(&self) -> HashMap<String, Vec<String>> {
+        let peers = self.inner.read().await;
+        peers
+            .iter()
+            .map(|(room_id, room_peers)| (room_id.clone(), room_peers.keys().cloned().collect()))
+            .collect()
     }
 }

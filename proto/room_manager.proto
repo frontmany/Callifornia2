@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package room_manager;
+
+service RoomManagerService {
+    rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
+    rpc CloseRoom(CloseRoomRequest) returns (CloseRoomResponse);
+    rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+enum RoomAssignmentStatus {
+    UNSPECIFIED = 0;
+    ASSIGNED = 1;
+    PENDING = 2;
+    NOT_FOUND = 3;
+}
+
+message GetRoomRequest {
+    string room_id = 1;
+    string signaling_owner_id = 2;
+    string signaling_owner_host = 3;
+    uint32 signaling_owner_port = 4;
+    bool create_if_missing = 5;
+}
+
+message GetRoomResponse {
+    RoomAssignmentStatus status = 1;
+    string room_id = 2;
+    string sfu_instance_id = 3;
+    string sfu_grpc_addr = 4;
+    string signaling_owner_id = 5;
+    string signaling_owner_host = 6;
+    uint32 signaling_owner_port = 7;
+    string room_state = 8;
+    string message = 9;
+}
+
+message CloseRoomRequest {
+    string room_id = 1;
+}
+
+message CloseRoomResponse {
+    bool closed = 1;
+    string message = 2;
+}
+
+message GetStatusRequest {}
+
+message SfuStatus {
+    string instance_id = 1;
+    string grpc_addr = 2;
+    uint32 max_clients = 3;
+    uint32 current_load = 4;
+    bool alive = 5;
+    int64 last_ping_unix = 6;
+    bool provisioned = 7;
+}
+
+message GetStatusResponse {
+    repeated SfuStatus sfu_instances = 1;
+    uint32 active_rooms = 2;
+    uint32 pending_requests = 3;
+}

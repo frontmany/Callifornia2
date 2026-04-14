@@ -3,7 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("PROTOC", protoc);
 
     tonic_prost_build::configure().compile_protos(
-        &["../proto/sfu.proto", "../proto/room_manager.proto"],
+        &["../proto/room_manager.proto", "../proto/sfu.proto"],
         &["../proto"],
     )?;
     Ok(())
