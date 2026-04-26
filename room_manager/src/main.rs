@@ -14,7 +14,7 @@ use tonic::transport::Server;
 use tracing::info;
 
 use crate::config::Config;
-use crate::models::{AppState, RoomManagerServer, StaticInventoryProvider};
+use crate::models::{RoomManager, SfuPool, State};
 use crate::proto::room_manager_pb::room_manager_service_server::RoomManagerServiceServer;
 use crate::runtime::health_loop;
 use crate::storage::init_redis;
@@ -31,9 +31,9 @@ async fn main() -> Result<()> {
         .parse()
         .with_context(|| format!("invalid ROOM_MANAGER_ADDR: {}", config.grpc_addr))?;
     let redis = init_redis(&config.redis_url, config.redis_connect_timeout).await?;
-    let provider = StaticInventoryProvider::new(config.sfu_candidates.clone());
+    let provider = SfuPool::new(config.sfu_candidates.clone());
 
-    let state = AppState {
+    let state = State {
         config,
         redis,
         provider,
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
     info!(addr = %socket_addr, "Room Manager listening");
     Server::builder()
-        .add_service(RoomManagerServiceServer::new(RoomManagerServer { state }))
+        .add_service(RoomManagerServiceServer::new(RoomManager { state }))
         .serve(socket_addr)
         .await
         .context("room manager server failed")

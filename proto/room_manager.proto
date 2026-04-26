@@ -8,7 +8,7 @@ service RoomManagerService {
     rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
 }
 
-enum RoomAssignmentStatus {
+enum RoomBindingStatus {
     UNSPECIFIED = 0;
     ASSIGNED = 1;
     PENDING = 2;
@@ -24,7 +24,7 @@ message GetRoomRequest {
 }
 
 message GetRoomResponse {
-    RoomAssignmentStatus status = 1;
+    RoomBindingStatus status = 1;
     string room_id = 2;
     string sfu_instance_id = 3;
     string sfu_grpc_addr = 4;

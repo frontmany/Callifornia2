@@ -2,7 +2,7 @@ use anyhow::Result;
 use tonic::transport::Endpoint;
 use tracing::{error, info};
 
-use crate::models::{AppState, SfuCandidate};
+use crate::models::{SfuCandidate, State};
 use crate::proto::sfu_pb::sfu_service_client::SfuServiceClient;
 use crate::proto::sfu_pb::PingRequest;
 use crate::storage::{
@@ -11,7 +11,7 @@ use crate::storage::{
 };
 use crate::util::unix_now;
 
-pub async fn health_loop(state: AppState) {
+pub async fn health_loop(state: State) {
     let interval = state.config.health_interval;
     loop {
         if let Err(err) = run_health_iteration(&state).await {
@@ -21,7 +21,7 @@ pub async fn health_loop(state: AppState) {
     }
 }
 
-async fn run_health_iteration(state: &AppState) -> Result<()> {
+async fn run_health_iteration(state: &State) -> Result<()> {
     let instances = list_sfu_instances(&state.redis).await?;
     let now = unix_now();
 
@@ -35,7 +35,7 @@ async fn run_health_iteration(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-async fn assign_waiting_requests(state: &AppState) -> Result<()> {
+async fn assign_waiting_requests(state: &State) -> Result<()> {
     loop {
         let Some(instance) = select_least_loaded_instance(&state.redis).await? else {
             break;
@@ -59,7 +59,7 @@ async fn assign_waiting_requests(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-async fn scale_down_idle_instances(state: &AppState) -> Result<()> {
+async fn scale_down_idle_instances(state: &State) -> Result<()> {
     let instances = list_sfu_instances(&state.redis).await?;
     let loads = load_sfu_loads(&state.redis).await?;
     let now = unix_now();

@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod message;
 mod peer_registry;

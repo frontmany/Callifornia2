@@ -24,8 +24,8 @@ pub enum ServerErrorCode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    Auth {
-        nickname: String,
+    Attach {
+        token: String,
     },
     Logout {
         session_id: String,
@@ -58,7 +58,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    AuthOk {
+    Attached {
         nickname: String,
         session_id: String,
     },
@@ -110,12 +110,12 @@ pub enum ServerMessage {
 
 #[derive(Debug, Error)]
 pub enum ValidationError {
-    #[error("nickname must be 3..32 characters and contain only letters, digits, '_' or '-'")]
-    InvalidNickname,
     #[error("session_id must be a valid UUID")]
     InvalidSessionId,
     #[error("room_id must be a valid UUID")]
     InvalidRoomId,
+    #[error("token must not be empty")]
+    InvalidToken,
     #[error("sdp must not be empty")]
     MissingSdp,
     #[error("candidate must not be empty")]
@@ -127,7 +127,7 @@ pub enum ValidationError {
 impl ClientMessage {
     pub fn validate(&self) -> Result<(), ValidationError> {
         match self {
-            ClientMessage::Auth { nickname } => validate_nickname(nickname),
+            ClientMessage::Attach { token } => validate_token(token),
             ClientMessage::Logout { session_id, .. } => validate_session_id(session_id),
             ClientMessage::Create { session_id } => validate_session_id(session_id),
             ClientMessage::Join {
@@ -163,20 +163,10 @@ impl ClientMessage {
     }
 }
 
-fn validate_nickname(nickname: &str) -> Result<(), ValidationError> {
-    let trimmed = nickname.trim();
-    let len = trimmed.chars().count();
-    if !(3..=32).contains(&len) {
-        return Err(ValidationError::InvalidNickname);
+fn validate_token(token: &str) -> Result<(), ValidationError> {
+    if token.trim().is_empty() {
+        return Err(ValidationError::InvalidToken);
     }
-
-    if !trimmed
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-    {
-        return Err(ValidationError::InvalidNickname);
-    }
-
     Ok(())
 }
 

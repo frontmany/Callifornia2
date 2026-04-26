@@ -3,17 +3,17 @@ pub mod pb {
 }
 
 use pb::room_manager_service_client::RoomManagerServiceClient;
-use pb::{CloseRoomRequest, GetRoomRequest, RoomAssignmentStatus};
+use pb::{CloseRoomRequest, GetRoomRequest, RoomBindingStatus};
 use tonic::transport::Channel;
 
 #[derive(Debug, Clone)]
-pub struct RoomAssignment {
+pub struct RoomBinding {
     pub sfu_grpc_addr: Option<String>,
     pub room_state: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssignmentStatus {
+pub enum BindingStatus {
     Assigned,
     Pending,
     NotFound,
@@ -44,7 +44,7 @@ impl Client {
         signaling_owner_host: &str,
         signaling_owner_port: u16,
         create_if_missing: bool,
-    ) -> Result<(AssignmentStatus, RoomAssignment), RoomManagerError> {
+    ) -> Result<(BindingStatus, RoomBinding), RoomManagerError> {
         let response = self
             .grpc_client()
             .get_room(GetRoomRequest {
@@ -57,24 +57,22 @@ impl Client {
             .await?
             .into_inner();
 
-        let status = match RoomAssignmentStatus::try_from(response.status)
-            .unwrap_or(RoomAssignmentStatus::Unspecified)
+        let status = match RoomBindingStatus::try_from(response.status)
+            .unwrap_or(RoomBindingStatus::Unspecified)
         {
-            RoomAssignmentStatus::Assigned => AssignmentStatus::Assigned,
-            RoomAssignmentStatus::Pending => AssignmentStatus::Pending,
-            RoomAssignmentStatus::NotFound | RoomAssignmentStatus::Unspecified => {
-                AssignmentStatus::NotFound
-            }
+            RoomBindingStatus::Assigned => BindingStatus::Assigned,
+            RoomBindingStatus::Pending => BindingStatus::Pending,
+            RoomBindingStatus::NotFound | RoomBindingStatus::Unspecified => BindingStatus::NotFound,
         };
 
         let _ = u16::try_from(response.signaling_owner_port)
             .map_err(|_| RoomManagerError::InvalidAssignment)?;
-        let assignment = RoomAssignment {
+        let binding = RoomBinding {
             sfu_grpc_addr: non_empty(response.sfu_grpc_addr),
             room_state: response.room_state,
         };
 
-        Ok((status, assignment))
+        Ok((status, binding))
     }
 
     pub async fn close_room(&self, room_id: &str) -> Result<bool, RoomManagerError> {

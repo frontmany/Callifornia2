@@ -1,21 +1,22 @@
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
-use crate::models::{RoomAssignment, RoomManagerServer, WaitingRequestRecord};
+use crate::models::{RoomBinding, RoomManager, WaitingRequestRecord};
 use crate::proto::room_manager_pb::room_manager_service_server::RoomManagerService;
 use crate::proto::room_manager_pb::{
     CloseRoomRequest, CloseRoomResponse, GetRoomRequest, GetRoomResponse, GetStatusRequest,
-    GetStatusResponse, RoomAssignmentStatus, SfuStatus,
+    GetStatusResponse, RoomBindingStatus, SfuStatus,
 };
 use crate::storage::{
     assign_room_to_instance, count_active_rooms, decrement_sfu_load, delete_room_assignment,
-    enqueue_waiting_request, get_room_assignment, list_sfu_instances, load_sfu_loads,
-    register_provisioning_instance, select_least_loaded_instance, waiting_request_count,
+    enqueue_waiting_request, get_room_assignment, has_provisioning_instance, list_sfu_instances,
+    load_sfu_loads, register_provisioning_instance, select_least_loaded_instance,
+    waiting_request_count,
 };
 use crate::util::{internal_status, unix_now};
 
 #[tonic::async_trait]
-impl RoomManagerService for RoomManagerServer {
+impl RoomManagerService for RoomManager {
     async fn get_room(
         &self,
         request: Request<GetRoomRequest>,
@@ -33,7 +34,7 @@ impl RoomManagerService for RoomManagerServer {
 
         if !request.create_if_missing {
             return Ok(Response::new(GetRoomResponse {
-                status: RoomAssignmentStatus::NotFound as i32,
+                status: RoomBindingStatus::NotFound as i32,
                 room_id: request.room_id,
                 message: "room not found".to_owned(),
                 ..Default::default()
@@ -71,7 +72,12 @@ impl RoomManagerService for RoomManagerServer {
         .await
         .map_err(internal_status)?;
 
-        if let Some(candidate) = self.state.provider.provision_next().await {
+        if has_provisioning_instance(&self.state.redis)
+            .await
+            .map_err(internal_status)?
+        {
+            info!("SFU provisioning already in progress; waiting for capacity");
+        } else if let Some(candidate) = self.state.provider.provision_next().await {
             // TODO(provisioner): здесь сейчас только логическая "резервация" кандидата.
             // Нужно вызывать внешний оркестратор (Docker/K8s/Cloud API),
             // запускать реальный SFU инстанс и только после успешного старта
@@ -85,7 +91,7 @@ impl RoomManagerService for RoomManagerServer {
         }
 
         Ok(Response::new(GetRoomResponse {
-            status: RoomAssignmentStatus::Pending as i32,
+            status: RoomBindingStatus::Pending as i32,
             room_id: request.room_id,
             signaling_owner_id: request.signaling_owner_id,
             signaling_owner_host: request.signaling_owner_host,
@@ -167,11 +173,11 @@ impl RoomManagerService for RoomManagerServer {
     }
 }
 
-fn build_room_response(assignment: RoomAssignment) -> GetRoomResponse {
+fn build_room_response(assignment: RoomBinding) -> GetRoomResponse {
     let status = match assignment.state.as_str() {
-        "active" => RoomAssignmentStatus::Assigned,
-        "allocating" => RoomAssignmentStatus::Pending,
-        _ => RoomAssignmentStatus::NotFound,
+        "active" => RoomBindingStatus::Assigned,
+        "allocating" => RoomBindingStatus::Pending,
+        _ => RoomBindingStatus::NotFound,
     };
 
     GetRoomResponse {

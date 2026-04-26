@@ -4,13 +4,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use redis::AsyncCommands;
 
-use crate::models::{RoomAssignment, SfuCandidate, SfuInstanceRecord, WaitingRequestRecord};
+use crate::models::{RoomBinding, SfuCandidate, SfuInstance, WaitingRequestRecord};
 use crate::util::unix_now;
 
 const SFU_INSTANCES_KEY: &str = "room_manager:sfu_instances";
 const SFU_LOAD_KEY: &str = "room_manager:sfu_load";
 const WAITING_REQUESTS_KEY: &str = "room_manager:waiting_requests";
-const ROOM_PREFIX: &str = "signaling:room:";
+const ROOM_PREFIX: &str = "room_manager:room:";
 
 pub async fn init_redis(redis_url: &str, _connect_timeout: Duration) -> Result<redis::Client> {
     let client = redis::Client::open(redis_url).context("create redis client")?;
@@ -22,7 +22,7 @@ pub async fn init_redis(redis_url: &str, _connect_timeout: Duration) -> Result<r
     Ok(client)
 }
 
-pub async fn select_least_loaded_instance(redis: &redis::Client) -> Result<Option<SfuInstanceRecord>> {
+pub async fn select_least_loaded_instance(redis: &redis::Client) -> Result<Option<SfuInstance>> {
     let instances = list_sfu_instances(redis).await?;
     let loads = load_sfu_loads(redis).await?;
     let now = unix_now();
@@ -50,16 +50,23 @@ pub async fn select_least_loaded_instance(redis: &redis::Client) -> Result<Optio
     Ok(selected)
 }
 
+pub async fn has_provisioning_instance(redis: &redis::Client) -> Result<bool> {
+    Ok(list_sfu_instances(redis)
+        .await?
+        .into_iter()
+        .any(|instance| matches!(instance.state.as_str(), "starting" | "provisioning")))
+}
+
 pub async fn assign_room_to_instance(
     redis: &redis::Client,
     room_id: &str,
     signaling_owner_id: &str,
     signaling_owner_host: &str,
     signaling_owner_port: u16,
-    instance: &SfuInstanceRecord,
-) -> Result<RoomAssignment> {
+    instance: &SfuInstance,
+) -> Result<RoomBinding> {
     let mut conn = redis.get_connection_manager().await?;
-    let meta_key = room_meta_key(room_id);
+    let meta_key = room_binding_key(room_id);
 
     let _: () = redis::pipe()
         .atomic()
@@ -75,7 +82,7 @@ pub async fn assign_room_to_instance(
 
     increment_sfu_load(redis, &instance.instance_id).await?;
 
-    Ok(RoomAssignment {
+    Ok(RoomBinding {
         room_id: room_id.to_owned(),
         owner_id: signaling_owner_id.to_owned(),
         owner_host: signaling_owner_host.to_owned(),
@@ -89,9 +96,9 @@ pub async fn assign_room_to_instance(
 pub async fn get_room_assignment(
     redis: &redis::Client,
     room_id: &str,
-) -> Result<Option<RoomAssignment>> {
+) -> Result<Option<RoomBinding>> {
     let mut conn = redis.get_connection_manager().await?;
-    let values: HashMap<String, String> = conn.hgetall(room_meta_key(room_id)).await?;
+    let values: HashMap<String, String> = conn.hgetall(room_binding_key(room_id)).await?;
     if values.is_empty() {
         return Ok(None);
     }
@@ -102,7 +109,7 @@ pub async fn get_room_assignment(
         .and_then(|value| value.parse().ok())
         .unwrap_or_default();
 
-    Ok(Some(RoomAssignment {
+    Ok(Some(RoomBinding {
         room_id: room_id.to_owned(),
         owner_id: values
             .get("signaling_owner_id")
@@ -131,7 +138,7 @@ pub async fn register_provisioning_instance(
 ) -> Result<()> {
     // TODO(provisioner): это запись "instance starting" без фактического запуска процесса.
     // После интеграции с оркестратором состояние должно идти из реального lifecycle инстанса.
-    let instance = SfuInstanceRecord {
+    let instance = SfuInstance {
         instance_id: candidate.instance_id.clone(),
         grpc_addr: candidate.grpc_addr.clone(),
         max_clients: candidate.max_clients,
@@ -165,7 +172,7 @@ pub async fn delete_sfu_instance(redis: &redis::Client, instance_id: &str) -> Re
     Ok(())
 }
 
-pub async fn list_sfu_instances(redis: &redis::Client) -> Result<Vec<SfuInstanceRecord>> {
+pub async fn list_sfu_instances(redis: &redis::Client) -> Result<Vec<SfuInstance>> {
     let mut conn = redis.get_connection_manager().await?;
     let values: HashMap<String, String> = conn.hgetall(SFU_INSTANCES_KEY).await?;
     values
@@ -229,7 +236,7 @@ pub async fn update_sfu_health(
 pub async fn get_sfu_instance(
     redis: &redis::Client,
     instance_id: &str,
-) -> Result<Option<SfuInstanceRecord>> {
+) -> Result<Option<SfuInstance>> {
     let mut conn = redis.get_connection_manager().await?;
     let payload: Option<String> = conn.hget(SFU_INSTANCES_KEY, instance_id).await?;
     payload
@@ -237,7 +244,7 @@ pub async fn get_sfu_instance(
         .transpose()
 }
 
-pub async fn save_sfu_instance(redis: &redis::Client, instance: &SfuInstanceRecord) -> Result<()> {
+pub async fn save_sfu_instance(redis: &redis::Client, instance: &SfuInstance) -> Result<()> {
     let payload = serde_json::to_string(instance)?;
     let mut conn = redis.get_connection_manager().await?;
     let _: usize = conn
@@ -264,7 +271,7 @@ pub async fn enqueue_waiting_request(
     let mut conn = redis.get_connection_manager().await?;
     let _: usize = conn.rpush(WAITING_REQUESTS_KEY, payload).await?;
 
-    let meta_key = room_meta_key(&record.room_id);
+    let meta_key = room_binding_key(&record.room_id);
     let _: usize = conn
         .hset(&meta_key, "owner_host", &record.signaling_owner_host)
         .await?;
@@ -301,7 +308,7 @@ pub async fn count_active_rooms(redis: &redis::Client) -> Result<usize> {
         let (next, keys): (u64, Vec<String>) = redis::cmd("SCAN")
             .arg(cursor)
             .arg("MATCH")
-            .arg("signaling:room:*:meta")
+            .arg("room_manager:room:*:binding")
             .query_async(&mut conn)
             .await?;
         total += keys.len();
@@ -317,19 +324,13 @@ pub async fn delete_room_assignment(redis: &redis::Client, room_id: &str) -> Res
     let mut conn = redis.get_connection_manager().await?;
     let _: () = redis::pipe()
         .atomic()
-        .del(room_meta_key(room_id))
-        .ignore()
-        .del(room_members_key(room_id))
+        .del(room_binding_key(room_id))
         .ignore()
         .query_async(&mut conn)
         .await?;
     Ok(())
 }
 
-fn room_meta_key(room_id: &str) -> String {
-    format!("{ROOM_PREFIX}{room_id}:meta")
-}
-
-fn room_members_key(room_id: &str) -> String {
-    format!("{ROOM_PREFIX}{room_id}:members")
+fn room_binding_key(room_id: &str) -> String {
+    format!("{ROOM_PREFIX}{room_id}:binding")
 }

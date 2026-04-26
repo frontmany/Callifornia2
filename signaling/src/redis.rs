@@ -6,6 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::timeout;
 const AUTH_NICKS_KEY: &str = "signaling:auth:nicks";
+const INSTANCE_LOAD_KEY: &str = "signaling:instance_load";
 const SESSION_PREFIX: &str = "signaling:session:";
 const ROOM_PREFIX: &str = "signaling:room:";
 
@@ -48,32 +49,9 @@ pub enum RedisRoomError {
     Redis(#[from] redis::RedisError),
 }
 
-pub async fn reserve_nickname(client: &Client, nickname: &str) -> Result<(), RedisRoomError> {
-    let mut conn = client.get_connection_manager().await?;
-    let added: usize = conn.sadd(AUTH_NICKS_KEY, nickname).await?;
-    if added == 0 {
-        return Err(RedisRoomError::NicknameTaken);
-    }
-
-    Ok(())
-}
-
 pub async fn release_nickname(client: &Client, nickname: &str) -> Result<(), RedisRoomError> {
     let mut conn = client.get_connection_manager().await?;
     let _: usize = conn.srem(AUTH_NICKS_KEY, nickname).await?;
-    Ok(())
-}
-
-pub async fn session_create(
-    client: &Client,
-    session_id: &str,
-    nickname: &str,
-) -> Result<(), RedisRoomError> {
-    let mut conn = client.get_connection_manager().await?;
-    let key = session_key(session_id);
-    let _: usize = conn.hset(&key, "nickname", nickname).await?;
-    let _: usize = conn.hset(&key, "room_id", "").await?;
-    let _: usize = conn.hset(&key, "pending_room_id", "").await?;
     Ok(())
 }
 
@@ -158,6 +136,29 @@ pub async fn session_delete(client: &Client, session_id: &str) -> Result<(), Red
     Ok(())
 }
 
+pub async fn increment_instance_load(
+    client: &Client,
+    instance_id: &str,
+) -> Result<(), RedisRoomError> {
+    let mut conn = client.get_connection_manager().await?;
+    let _: f64 = conn.zincr(INSTANCE_LOAD_KEY, instance_id, 1).await?;
+    Ok(())
+}
+
+pub async fn decrement_instance_load(
+    client: &Client,
+    instance_id: &str,
+) -> Result<(), RedisRoomError> {
+    let mut conn = client.get_connection_manager().await?;
+    let current: f64 = conn
+        .zscore(INSTANCE_LOAD_KEY, instance_id)
+        .await
+        .unwrap_or(0.0);
+    let next = if current <= 0.0 { 0.0 } else { current - 1.0 };
+    let _: usize = conn.zadd(INSTANCE_LOAD_KEY, instance_id, next).await?;
+    Ok(())
+}
+
 pub async fn init_redis(redis_url: &str, connect_timeout: Duration) -> Result<Client> {
     let client = Client::open(redis_url).context("create redis client")?;
     let mut conn = connect_redis(&client, connect_timeout).await?;
@@ -220,6 +221,27 @@ pub async fn get_room_route(client: &Client, room_id: &str) -> Result<RoomRoute,
             .cloned()
             .filter(|value| !value.is_empty()),
     })
+}
+
+pub async fn upsert_room_route(
+    client: &Client,
+    room_id: &str,
+    target: &RoomTarget,
+    room_state: &str,
+    sfu_grpc_addr: Option<&str>,
+) -> Result<(), RedisRoomError> {
+    let mut conn = client.get_connection_manager().await?;
+    let key = room_meta_key(room_id);
+    let _: () = redis::pipe()
+        .atomic()
+        .hset(&key, "owner_host", &target.host)
+        .hset(&key, "owner_port", target.port)
+        .hset(&key, "room_state", room_state)
+        .hset(&key, "sfu_grpc_addr", sfu_grpc_addr.unwrap_or(""))
+        .ignore()
+        .query_async(&mut conn)
+        .await?;
+    Ok(())
 }
 
 pub async fn join_room(

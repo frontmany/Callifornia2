@@ -9,9 +9,10 @@ use tokio::time::timeout;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::auth;
 use crate::message::{ClientMessage, ServerErrorCode, ServerMessage};
 use crate::redis::{self, RedisRoomError, RoomTarget, SessionState};
-use crate::room_manager::{AssignmentStatus, RoomManagerError};
+use crate::room_manager::{BindingStatus, RoomManagerError};
 use crate::sfu::SfuClientError;
 use crate::state::State;
 
@@ -20,12 +21,17 @@ struct ConnectionContext {
     session_id: Option<String>,
     keep_session_for_transfer: bool,
     cached_session: Option<SessionState>,
+    allowed_intent: Option<String>,
+    allowed_room_id: Option<String>,
+    instance_load_registered: bool,
 }
 
 #[derive(Debug, Error)]
 enum WsHandlerError {
     #[error("connection is already authorized")]
     AlreadyAuthorized,
+    #[error("connection is not authorized")]
+    Unauthorized,
     #[error("session conflict")]
     SessionConflict,
     #[error("connection is not joined to room")]
@@ -165,7 +171,7 @@ async fn handle_client_message(
     message: ClientMessage,
 ) -> Result<(), WsHandlerError> {
     match message {
-        ClientMessage::Auth { nickname } => {
+        ClientMessage::Attach { token } => {
             if context.session_id.is_some() {
                 return Err(WsHandlerError::AlreadyAuthorized);
             }
@@ -173,38 +179,36 @@ async fn handle_client_message(
                 return Err(WsHandlerError::RedisError);
             }
 
-            redis::reserve_nickname(&state.redis, &nickname)
+            let claims = auth::validate_connector_token(
+                &token,
+                &state.config.connector_token_secret,
+                &state.config.public_node_id(),
+            )
+            .map_err(|_| WsHandlerError::Unauthorized)?;
+            let session = redis::session_get(&state.redis, &claims.session_id)
+                .await
+                .map_err(map_redis_error)?
+                .filter(|session| session.nickname == claims.nickname)
+                .ok_or(WsHandlerError::Unauthorized)?;
+
+            context.session_id = Some(claims.session_id.clone());
+            context.keep_session_for_transfer = false;
+            context.cached_session = Some(session.clone());
+            context.allowed_intent = Some(claims.intent);
+            context.allowed_room_id = claims.room_id;
+            redis::increment_instance_load(&state.redis, &state.config.public_node_id())
                 .await
                 .map_err(map_redis_error)?;
-            let session_id = Uuid::new_v4().to_string();
-            if let Err(err) = redis::session_create(&state.redis, &session_id, &nickname).await {
-                let _ = redis::release_nickname(&state.redis, &nickname).await;
-                return Err(map_redis_error(err));
-            }
-
-            context.session_id = Some(session_id.clone());
-            context.keep_session_for_transfer = false;
-            context.cached_session = Some(SessionState {
-                nickname: nickname.clone(),
-                room_id: None,
-                pending_room_id: None,
-            });
+            context.instance_load_registered = true;
             state
                 .sessions
-                .upsert(
-                    &session_id,
-                    SessionState {
-                        nickname: nickname.clone(),
-                        room_id: None,
-                        pending_room_id: None,
-                    },
-                )
+                .upsert(&claims.session_id, session.clone())
                 .await;
             send_message(
                 socket,
-                ServerMessage::AuthOk {
-                    nickname,
-                    session_id,
+                ServerMessage::Attached {
+                    nickname: session.nickname,
+                    session_id: claims.session_id,
                 },
                 state.config.ws_write_timeout,
             )
@@ -230,6 +234,12 @@ async fn handle_client_message(
                 .await?;
             }
             if state.is_redis_available().await {
+                if context.instance_load_registered {
+                    redis::decrement_instance_load(&state.redis, &state.config.public_node_id())
+                        .await
+                        .map_err(map_redis_error)?;
+                    context.instance_load_registered = false;
+                }
                 redis::release_nickname(&state.redis, &session.nickname)
                     .await
                     .map_err(map_redis_error)?;
@@ -260,12 +270,15 @@ async fn handle_client_message(
             if session.room_id.is_some() {
                 return Err(WsHandlerError::AlreadyInRoom);
             }
+            if context.allowed_intent.as_deref() != Some("create") {
+                return Err(WsHandlerError::Unauthorized);
+            }
 
             let room_id = session
                 .pending_room_id
                 .clone()
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
-            let (assignment_status, assignment) = state
+            let (binding_status, binding) = state
                 .room_manager
                 .get_room(
                     &room_id,
@@ -276,8 +289,8 @@ async fn handle_client_message(
                 )
                 .await
                 .map_err(map_room_manager_error)?;
-            if assignment_status != AssignmentStatus::Assigned || assignment.room_state != "active"
-            {
+            if binding_status != BindingStatus::Assigned || binding.room_state != "active" {
+                save_room_route(state, &room_id, "allocating", None).await?;
                 redis::session_set_pending_room(&state.redis, &session_id, Some(&room_id))
                     .await
                     .map_err(map_redis_error)?;
@@ -290,9 +303,10 @@ async fn handle_client_message(
                 }
                 return Err(WsHandlerError::RoomNotReady);
             }
-            let sfu_addr = assignment
+            let sfu_addr = binding
                 .sfu_grpc_addr
                 .ok_or(WsHandlerError::SfuUnavailable)?;
+            save_room_route(state, &room_id, "active", Some(&sfu_addr)).await?;
 
             let _ = redis::join_room(&state.redis, &room_id, &session.nickname)
                 .await
@@ -344,6 +358,11 @@ async fn handle_client_message(
             let session = check_session(state, context, &session_id).await?;
             if session.room_id.is_some() {
                 return Err(WsHandlerError::AlreadyInRoom);
+            }
+            if context.allowed_intent.as_deref() != Some("join")
+                || context.allowed_room_id.as_deref() != Some(room_id.as_str())
+            {
+                return Err(WsHandlerError::Unauthorized);
             }
 
             let route = redis::get_room_route(&state.redis, &room_id)
@@ -513,6 +532,13 @@ async fn cleanup_connection(state: &State, context: &ConnectionContext) {
     };
 
     if context.keep_session_for_transfer {
+        if context.instance_load_registered && state.is_redis_available().await {
+            if let Err(err) =
+                redis::decrement_instance_load(&state.redis, &state.config.public_node_id()).await
+            {
+                warn!(error = %err, "failed to decrement signaling instance load");
+            }
+        }
         state.sessions.remove(session_id).await;
         return;
     }
@@ -529,6 +555,13 @@ async fn cleanup_connection(state: &State, context: &ConnectionContext) {
         leave_room_and_notify(state, room_id, &session.nickname, "signaling_disconnected").await;
     }
     if state.is_redis_available().await {
+        if context.instance_load_registered {
+            if let Err(err) =
+                redis::decrement_instance_load(&state.redis, &state.config.public_node_id()).await
+            {
+                warn!(error = %err, "failed to decrement signaling instance load");
+            }
+        }
         if let Err(err) = redis::release_nickname(&state.redis, &session.nickname).await {
             warn!(error = %err, nickname = %session.nickname, "failed to release auth nickname");
         }
@@ -578,6 +611,7 @@ fn map_error(err: &WsHandlerError) -> (ServerErrorCode, &'static str) {
             ServerErrorCode::AlreadyAuthorized,
             "Connection is already authorized",
         ),
+        WsHandlerError::Unauthorized => (ServerErrorCode::Unauthorized, "Unauthorized"),
         WsHandlerError::SessionConflict => (
             ServerErrorCode::SessionConflict,
             "Invalid or conflicting session",
@@ -688,6 +722,21 @@ fn map_room_manager_error(err: RoomManagerError) -> WsHandlerError {
 fn is_local_target(state: &State, target: &RoomTarget) -> bool {
     target.host == state.config.signaling_public_host
         && target.port == state.config.signaling_public_port
+}
+
+async fn save_room_route(
+    state: &State,
+    room_id: &str,
+    room_state: &str,
+    sfu_grpc_addr: Option<&str>,
+) -> Result<(), WsHandlerError> {
+    let target = RoomTarget {
+        host: state.config.signaling_public_host.clone(),
+        port: state.config.signaling_public_port,
+    };
+    redis::upsert_room_route(&state.redis, room_id, &target, room_state, sfu_grpc_addr)
+        .await
+        .map_err(map_redis_error)
 }
 
 async fn leave_room_and_notify(state: &State, room_id: &str, nickname: &str, reason: &str) {

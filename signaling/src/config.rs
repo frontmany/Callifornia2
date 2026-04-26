@@ -11,6 +11,7 @@ pub struct Config {
     pub signaling_public_port: u16,
     pub redis_url: String,
     pub room_manager_grpc_addr: String,
+    pub connector_token_secret: String,
     pub redis_connect_timeout: Duration,
     pub rpc_connect_timeout: Duration,
     pub ws_read_timeout: Duration,
@@ -30,6 +31,8 @@ impl Config {
         let redis_url = get_env_or("REDIS_URL", "redis://redis:6379/");
         let room_manager_grpc_addr =
             get_env_or("ROOM_MANAGER_GRPC_ADDR", "http://room-manager:50061");
+        let connector_token_secret =
+            get_env_or("CONNECTOR_TOKEN_SECRET", "dev-connector-token-secret");
 
         let redis_connect_timeout = duration_from_env("REDIS_CONNECT_TIMEOUT_MS", 2_000)
             .context("REDIS_CONNECT_TIMEOUT_MS")?;
@@ -48,6 +51,7 @@ impl Config {
             signaling_public_port,
             redis_url,
             room_manager_grpc_addr,
+            connector_token_secret,
             redis_connect_timeout,
             rpc_connect_timeout,
             ws_read_timeout,

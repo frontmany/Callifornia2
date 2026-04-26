@@ -14,7 +14,7 @@ pub struct SfuCandidate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SfuInstanceRecord {
+pub struct SfuInstance {
     pub instance_id: String,
     pub grpc_addr: String,
     pub max_clients: u32,
@@ -35,7 +35,7 @@ pub struct WaitingRequestRecord {
 }
 
 #[derive(Debug, Clone)]
-pub struct RoomAssignment {
+pub struct RoomBinding {
     pub room_id: String,
     pub owner_id: String,
     pub owner_host: String,
@@ -46,12 +46,12 @@ pub struct RoomAssignment {
 }
 
 #[derive(Clone)]
-pub struct StaticInventoryProvider {
+pub struct SfuPool {
     available: Arc<Mutex<VecDeque<SfuCandidate>>>,
     provisioned: Arc<Mutex<HashSet<String>>>,
 }
 
-impl StaticInventoryProvider {
+impl SfuPool {
     pub fn new(candidates: Vec<SfuCandidate>) -> Self {
         Self {
             available: Arc::new(Mutex::new(VecDeque::from(candidates))),
@@ -62,10 +62,12 @@ impl StaticInventoryProvider {
     pub async fn provision_next(&self) -> Option<SfuCandidate> {
         let mut queue = self.available.lock().await;
         let candidate = queue.pop_front()?;
+
         self.provisioned
             .lock()
             .await
             .insert(candidate.instance_id.clone());
+
         Some(candidate)
     }
 
@@ -81,13 +83,13 @@ impl StaticInventoryProvider {
 }
 
 #[derive(Clone)]
-pub struct AppState {
+pub struct State {
     pub config: Arc<Config>,
     pub redis: redis::Client,
-    pub provider: StaticInventoryProvider,
+    pub provider: SfuPool,
 }
 
 #[derive(Clone)]
-pub struct RoomManagerServer {
-    pub state: AppState,
+pub struct RoomManager {
+    pub state: State,
 }
