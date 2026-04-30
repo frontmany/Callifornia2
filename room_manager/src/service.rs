@@ -8,9 +8,9 @@ use crate::proto::room_manager_pb::{
     GetStatusResponse, RoomBindingStatus, SfuStatus,
 };
 use crate::storage::{
-    assign_room_to_instance, count_active_rooms, decrement_sfu_load, delete_room_assignment,
+    assign_room_to_instance, count_active_rooms, decrement_sfu_room_load, delete_room_assignment,
     enqueue_waiting_request, get_room_assignment, has_provisioning_instance, list_sfu_instances,
-    load_sfu_loads, register_provisioning_instance, select_least_loaded_instance,
+    load_sfu_room_loads, register_provisioning_instance, select_least_loaded_instance,
     waiting_request_count,
 };
 use crate::util::{internal_status, unix_now};
@@ -118,7 +118,7 @@ impl RoomManagerService for RoomManager {
         };
 
         if let Some(instance_id) = assignment.sfu_instance_id.as_deref() {
-            decrement_sfu_load(&self.state.redis, instance_id)
+            decrement_sfu_room_load(&self.state.redis, instance_id)
                 .await
                 .map_err(internal_status)?;
         }
@@ -139,7 +139,7 @@ impl RoomManagerService for RoomManager {
         let instances = list_sfu_instances(&self.state.redis)
             .await
             .map_err(internal_status)?;
-        let loads = load_sfu_loads(&self.state.redis)
+        let room_loads = load_sfu_room_loads(&self.state.redis)
             .await
             .map_err(internal_status)?;
         let active_rooms = count_active_rooms(&self.state.redis)
@@ -154,8 +154,8 @@ impl RoomManagerService for RoomManager {
             .map(|instance| SfuStatus {
                 instance_id: instance.instance_id.clone(),
                 grpc_addr: instance.grpc_addr,
-                max_clients: instance.max_clients,
-                current_load: loads
+                max_rooms: instance.max_rooms,
+                current_rooms: room_loads
                     .get(&instance.instance_id)
                     .copied()
                     .unwrap_or_default() as u32,

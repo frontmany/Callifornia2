@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::auth;
 use crate::message::{ClientMessage, ServerErrorCode, ServerMessage};
-use crate::redis::{self, RedisRoomError, RoomTarget, SessionState};
+use crate::redis::{self, RedisRoomError, SessionState};
 use crate::room_manager::{BindingStatus, RoomManagerError};
 use crate::sfu::SfuClientError;
 use crate::state::State;
@@ -290,7 +290,6 @@ async fn handle_client_message(
                 .await
                 .map_err(map_room_manager_error)?;
             if binding_status != BindingStatus::Assigned || binding.room_state != "active" {
-                save_room_route(state, &room_id, "allocating", None).await?;
                 redis::session_set_pending_room(&state.redis, &session_id, Some(&room_id))
                     .await
                     .map_err(map_redis_error)?;
@@ -306,8 +305,6 @@ async fn handle_client_message(
             let sfu_addr = binding
                 .sfu_grpc_addr
                 .ok_or(WsHandlerError::SfuUnavailable)?;
-            save_room_route(state, &room_id, "active", Some(&sfu_addr)).await?;
-
             let _ = redis::join_room(&state.redis, &room_id, &session.nickname)
                 .await
                 .map_err(map_redis_error)?;
@@ -368,15 +365,14 @@ async fn handle_client_message(
             let route = redis::get_room_route(&state.redis, &room_id)
                 .await
                 .map_err(map_redis_error)?;
-            let target = route.target.clone();
-            if !is_local_target(state, &target) {
+            if !is_local_target(state, &route) {
                 context.keep_session_for_transfer = true;
                 send_message(
                     socket,
                     ServerMessage::TransferRequired {
                         room_id,
-                        target_host: target.host,
-                        target_port: target.port,
+                        target_host: route.owner_host,
+                        target_port: route.owner_port,
                     },
                     state.config.ws_write_timeout,
                 )
@@ -719,24 +715,9 @@ fn map_room_manager_error(err: RoomManagerError) -> WsHandlerError {
     }
 }
 
-fn is_local_target(state: &State, target: &RoomTarget) -> bool {
-    target.host == state.config.signaling_public_host
-        && target.port == state.config.signaling_public_port
-}
-
-async fn save_room_route(
-    state: &State,
-    room_id: &str,
-    room_state: &str,
-    sfu_grpc_addr: Option<&str>,
-) -> Result<(), WsHandlerError> {
-    let target = RoomTarget {
-        host: state.config.signaling_public_host.clone(),
-        port: state.config.signaling_public_port,
-    };
-    redis::upsert_room_route(&state.redis, room_id, &target, room_state, sfu_grpc_addr)
-        .await
-        .map_err(map_redis_error)
+fn is_local_target(state: &State, route: &redis::RoomRoute) -> bool {
+    route.owner_host == state.config.signaling_public_host
+        && route.owner_port == state.config.signaling_public_port
 }
 
 async fn leave_room_and_notify(state: &State, room_id: &str, nickname: &str, reason: &str) {

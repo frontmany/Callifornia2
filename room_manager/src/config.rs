@@ -76,16 +76,16 @@ fn parse_candidates(value: &str) -> Result<Vec<SfuCandidate>> {
                 .next()
                 .filter(|value| !value.is_empty())
                 .context("candidate grpc_addr is required")?;
-            let max_clients = parts
+            let max_rooms = parts
                 .next()
-                .context("candidate max_clients is required")?
+                .context("candidate max_rooms is required")?
                 .parse()
-                .context("candidate max_clients must be integer")?;
+                .context("candidate max_rooms must be integer")?;
 
             Ok(SfuCandidate {
                 instance_id: instance_id.to_owned(),
                 grpc_addr: grpc_addr.to_owned(),
-                max_clients,
+                max_rooms,
             })
         })
         .collect()

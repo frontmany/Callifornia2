@@ -8,7 +8,7 @@ use crate::models::{RoomBinding, SfuCandidate, SfuInstance, WaitingRequestRecord
 use crate::util::unix_now;
 
 const SFU_INSTANCES_KEY: &str = "room_manager:sfu_instances";
-const SFU_LOAD_KEY: &str = "room_manager:sfu_load";
+const SFU_ROOM_LOAD_KEY: &str = "room_manager:sfu_room_load";
 const WAITING_REQUESTS_KEY: &str = "room_manager:waiting_requests";
 const ROOM_PREFIX: &str = "room_manager:room:";
 
@@ -24,7 +24,7 @@ pub async fn init_redis(redis_url: &str, _connect_timeout: Duration) -> Result<r
 
 pub async fn select_least_loaded_instance(redis: &redis::Client) -> Result<Option<SfuInstance>> {
     let instances = list_sfu_instances(redis).await?;
-    let loads = load_sfu_loads(redis).await?;
+    let room_loads = load_sfu_room_loads(redis).await?;
     let now = unix_now();
 
     let selected = instances
@@ -33,15 +33,21 @@ pub async fn select_least_loaded_instance(redis: &redis::Client) -> Result<Optio
             instance.alive
                 && now - instance.last_ping_unix <= 30
                 && instance.state == "ready"
-                && loads
+                && room_loads
                     .get(&instance.instance_id)
                     .copied()
                     .unwrap_or_default()
-                    < f64::from(instance.max_clients)
+                    < f64::from(instance.max_rooms)
         })
         .min_by(|left, right| {
-            let left_load = loads.get(&left.instance_id).copied().unwrap_or_default();
-            let right_load = loads.get(&right.instance_id).copied().unwrap_or_default();
+            let left_load = room_loads
+                .get(&left.instance_id)
+                .copied()
+                .unwrap_or_default();
+            let right_load = room_loads
+                .get(&right.instance_id)
+                .copied()
+                .unwrap_or_default();
             left_load
                 .partial_cmp(&right_load)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -80,7 +86,7 @@ pub async fn assign_room_to_instance(
         .query_async(&mut conn)
         .await?;
 
-    increment_sfu_load(redis, &instance.instance_id).await?;
+    increment_sfu_room_load(redis, &instance.instance_id).await?;
 
     Ok(RoomBinding {
         room_id: room_id.to_owned(),
@@ -141,7 +147,7 @@ pub async fn register_provisioning_instance(
     let instance = SfuInstance {
         instance_id: candidate.instance_id.clone(),
         grpc_addr: candidate.grpc_addr.clone(),
-        max_clients: candidate.max_clients,
+        max_rooms: candidate.max_rooms,
         alive: false,
         provisioned: true,
         state: "starting".to_owned(),
@@ -153,7 +159,9 @@ pub async fn register_provisioning_instance(
     let _: usize = conn
         .hset(SFU_INSTANCES_KEY, &instance.instance_id, payload)
         .await?;
-    let _: usize = conn.zadd(SFU_LOAD_KEY, &instance.instance_id, 0).await?;
+    let _: usize = conn
+        .zadd(SFU_ROOM_LOAD_KEY, &instance.instance_id, 0)
+        .await?;
     Ok(())
 }
 
@@ -165,7 +173,7 @@ pub async fn delete_sfu_instance(redis: &redis::Client, instance_id: &str) -> Re
         .atomic()
         .hdel(SFU_INSTANCES_KEY, instance_id)
         .ignore()
-        .zrem(SFU_LOAD_KEY, instance_id)
+        .zrem(SFU_ROOM_LOAD_KEY, instance_id)
         .ignore()
         .query_async(&mut conn)
         .await?;
@@ -181,23 +189,26 @@ pub async fn list_sfu_instances(redis: &redis::Client) -> Result<Vec<SfuInstance
         .collect()
 }
 
-pub async fn load_sfu_loads(redis: &redis::Client) -> Result<HashMap<String, f64>> {
+pub async fn load_sfu_room_loads(redis: &redis::Client) -> Result<HashMap<String, f64>> {
     let mut conn = redis.get_connection_manager().await?;
-    let entries: Vec<(String, f64)> = conn.zrange_withscores(SFU_LOAD_KEY, 0, -1).await?;
+    let entries: Vec<(String, f64)> = conn.zrange_withscores(SFU_ROOM_LOAD_KEY, 0, -1).await?;
     Ok(entries.into_iter().collect())
 }
 
-pub async fn increment_sfu_load(redis: &redis::Client, instance_id: &str) -> Result<()> {
+pub async fn increment_sfu_room_load(redis: &redis::Client, instance_id: &str) -> Result<()> {
     let mut conn = redis.get_connection_manager().await?;
-    let _: f64 = conn.zincr(SFU_LOAD_KEY, instance_id, 1).await?;
+    let _: f64 = conn.zincr(SFU_ROOM_LOAD_KEY, instance_id, 1).await?;
     update_idle_since(redis, instance_id, 0).await
 }
 
-pub async fn decrement_sfu_load(redis: &redis::Client, instance_id: &str) -> Result<()> {
+pub async fn decrement_sfu_room_load(redis: &redis::Client, instance_id: &str) -> Result<()> {
     let mut conn = redis.get_connection_manager().await?;
-    let current: f64 = conn.zscore(SFU_LOAD_KEY, instance_id).await.unwrap_or(0.0);
+    let current: f64 = conn
+        .zscore(SFU_ROOM_LOAD_KEY, instance_id)
+        .await
+        .unwrap_or(0.0);
     let next = if current <= 0.0 { 0.0 } else { current - 1.0 };
-    let _: usize = conn.zadd(SFU_LOAD_KEY, instance_id, next).await?;
+    let _: usize = conn.zadd(SFU_ROOM_LOAD_KEY, instance_id, next).await?;
     if next == 0.0 {
         update_idle_since(redis, instance_id, unix_now()).await?;
     }

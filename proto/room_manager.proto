@@ -49,8 +49,8 @@ message GetStatusRequest {}
 message SfuStatus {
     string instance_id = 1;
     string grpc_addr = 2;
-    uint32 max_clients = 3;
-    uint32 current_load = 4;
+    uint32 max_rooms = 3;
+    uint32 current_rooms = 4;
     bool alive = 5;
     int64 last_ping_unix = 6;
     bool provisioned = 7;

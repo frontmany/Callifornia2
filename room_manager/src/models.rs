@@ -10,14 +10,14 @@ use crate::config::Config;
 pub struct SfuCandidate {
     pub instance_id: String,
     pub grpc_addr: String,
-    pub max_clients: u32,
+    pub max_rooms: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SfuInstance {
     pub instance_id: String,
     pub grpc_addr: String,
-    pub max_clients: u32,
+    pub max_rooms: u32,
     pub alive: bool,
     pub provisioned: bool,
     pub state: String,

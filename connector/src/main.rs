@@ -156,13 +156,16 @@ async fn handle_message(
             redis::reserve_nickname(&state.redis, &nickname)
                 .await
                 .map_err(map_redis_error)?;
+
             let session_id = Uuid::new_v4().to_string();
             if let Err(err) = redis::session_create(&state.redis, &session_id, &nickname).await {
                 let _ = redis::release_nickname(&state.redis, &nickname).await;
                 return Err(map_redis_error(err));
             }
+
             context.session_id = Some(session_id.clone());
             context.nickname = Some(nickname.clone());
+
             send_message(
                 socket,
                 ServerMessage::AuthOk {

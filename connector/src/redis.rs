@@ -9,7 +9,7 @@ use tokio::time::timeout;
 const AUTH_NICKS_KEY: &str = "signaling:auth:nicks";
 const INSTANCE_LOAD_KEY: &str = "signaling:instance_load";
 const SESSION_PREFIX: &str = "signaling:session:";
-const ROOM_PREFIX: &str = "signaling:room:";
+const ROOM_BINDING_PREFIX: &str = "room_manager:room:";
 
 #[derive(Debug, Clone)]
 pub struct RoomRoute {
@@ -74,7 +74,7 @@ pub async fn session_delete(client: &Client, session_id: &str) -> Result<(), Red
 
 pub async fn get_room_route(client: &Client, room_id: &str) -> Result<RoomRoute, RedisError> {
     let mut conn = client.get_connection_manager().await?;
-    let values: HashMap<String, String> = conn.hgetall(room_meta_key(room_id)).await?;
+    let values: HashMap<String, String> = conn.hgetall(room_binding_key(room_id)).await?;
     if values.is_empty() {
         return Err(RedisError::RoomNotFound);
     }
@@ -111,6 +111,6 @@ fn session_key(session_id: &str) -> String {
     format!("{SESSION_PREFIX}{session_id}")
 }
 
-fn room_meta_key(room_id: &str) -> String {
-    format!("{ROOM_PREFIX}{room_id}:meta")
+fn room_binding_key(room_id: &str) -> String {
+    format!("{ROOM_BINDING_PREFIX}{room_id}:binding")
 }

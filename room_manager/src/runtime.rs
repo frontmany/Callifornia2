@@ -6,7 +6,7 @@ use crate::models::{SfuCandidate, State};
 use crate::proto::sfu_pb::sfu_service_client::SfuServiceClient;
 use crate::proto::sfu_pb::PingRequest;
 use crate::storage::{
-    assign_room_to_instance, delete_sfu_instance, list_sfu_instances, load_sfu_loads,
+    assign_room_to_instance, delete_sfu_instance, list_sfu_instances, load_sfu_room_loads,
     pop_waiting_request, select_least_loaded_instance, update_sfu_health,
 };
 use crate::util::unix_now;
@@ -61,15 +61,15 @@ async fn assign_waiting_requests(state: &State) -> Result<()> {
 
 async fn scale_down_idle_instances(state: &State) -> Result<()> {
     let instances = list_sfu_instances(&state.redis).await?;
-    let loads = load_sfu_loads(&state.redis).await?;
+    let room_loads = load_sfu_room_loads(&state.redis).await?;
     let now = unix_now();
 
     for instance in instances {
-        let load = loads
+        let room_load = room_loads
             .get(&instance.instance_id)
             .copied()
             .unwrap_or_default();
-        if load > 0.0 || !instance.provisioned {
+        if room_load > 0.0 || !instance.provisioned {
             continue;
         }
         if instance.idle_since_unix <= 0 {
@@ -88,7 +88,7 @@ async fn scale_down_idle_instances(state: &State) -> Result<()> {
                 SfuCandidate {
                     instance_id: instance_id.clone(),
                     grpc_addr: instance.grpc_addr,
-                    max_clients: instance.max_clients,
+                    max_rooms: instance.max_rooms,
                 },
             )
             .await;

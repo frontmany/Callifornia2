@@ -8,7 +8,8 @@ use tokio::time::timeout;
 const AUTH_NICKS_KEY: &str = "signaling:auth:nicks";
 const INSTANCE_LOAD_KEY: &str = "signaling:instance_load";
 const SESSION_PREFIX: &str = "signaling:session:";
-const ROOM_PREFIX: &str = "signaling:room:";
+const ROOM_BINDING_PREFIX: &str = "room_manager:room:";
+const ROOM_MEMBERS_PREFIX: &str = "signaling:room:";
 
 #[derive(Debug, Clone)]
 pub struct SessionState {
@@ -18,14 +19,9 @@ pub struct SessionState {
 }
 
 #[derive(Debug, Clone)]
-pub struct RoomTarget {
-    pub host: String,
-    pub port: u16,
-}
-
-#[derive(Debug, Clone)]
 pub struct RoomRoute {
-    pub target: RoomTarget,
+    pub owner_host: String,
+    pub owner_port: u16,
     pub room_state: String,
     pub sfu_grpc_addr: Option<String>,
 }
@@ -187,14 +183,9 @@ async fn connect_redis(client: &Client, connect_timeout: Duration) -> Result<Con
         .context("redis connection manager failed")
 }
 
-#[allow(dead_code)]
-pub async fn get_room_target(client: &Client, room_id: &str) -> Result<RoomTarget, RedisRoomError> {
-    Ok(get_room_route(client, room_id).await?.target)
-}
-
 pub async fn get_room_route(client: &Client, room_id: &str) -> Result<RoomRoute, RedisRoomError> {
     let mut conn = client.get_connection_manager().await?;
-    let values: HashMap<String, String> = conn.hgetall(room_meta_key(room_id)).await?;
+    let values: HashMap<String, String> = conn.hgetall(room_binding_key(room_id)).await?;
     if values.is_empty() {
         return Err(RedisRoomError::RoomNotFound);
     }
@@ -211,7 +202,8 @@ pub async fn get_room_route(client: &Client, room_id: &str) -> Result<RoomRoute,
         .map_err(|_| RedisRoomError::InvalidRoomTarget)?;
 
     Ok(RoomRoute {
-        target: RoomTarget { host, port },
+        owner_host: host,
+        owner_port: port,
         room_state: values
             .get("room_state")
             .cloned()
@@ -223,27 +215,6 @@ pub async fn get_room_route(client: &Client, room_id: &str) -> Result<RoomRoute,
     })
 }
 
-pub async fn upsert_room_route(
-    client: &Client,
-    room_id: &str,
-    target: &RoomTarget,
-    room_state: &str,
-    sfu_grpc_addr: Option<&str>,
-) -> Result<(), RedisRoomError> {
-    let mut conn = client.get_connection_manager().await?;
-    let key = room_meta_key(room_id);
-    let _: () = redis::pipe()
-        .atomic()
-        .hset(&key, "owner_host", &target.host)
-        .hset(&key, "owner_port", target.port)
-        .hset(&key, "room_state", room_state)
-        .hset(&key, "sfu_grpc_addr", sfu_grpc_addr.unwrap_or(""))
-        .ignore()
-        .query_async(&mut conn)
-        .await?;
-    Ok(())
-}
-
 pub async fn join_room(
     client: &Client,
     room_id: &str,
@@ -251,7 +222,7 @@ pub async fn join_room(
 ) -> Result<Vec<String>, RedisRoomError> {
     let mut conn = client.get_connection_manager().await?;
 
-    let exists: bool = conn.exists(room_meta_key(room_id)).await?;
+    let exists: bool = conn.exists(room_binding_key(room_id)).await?;
     if !exists {
         return Err(RedisRoomError::RoomNotFound);
     }
@@ -277,9 +248,9 @@ pub async fn leave_room(
 ) -> Result<LeaveRoomResult, RedisRoomError> {
     let mut conn = client.get_connection_manager().await?;
     let members_key = room_members_key(room_id);
-    let meta_key = room_meta_key(room_id);
+    let binding_key = room_binding_key(room_id);
 
-    let exists: bool = conn.exists(&meta_key).await?;
+    let exists: bool = conn.exists(&binding_key).await?;
     if !exists {
         return Err(RedisRoomError::RoomNotFound);
     }
@@ -302,14 +273,7 @@ pub async fn leave_room(
 #[allow(dead_code)]
 pub async fn delete_room(client: &Client, room_id: &str) -> Result<(), RedisRoomError> {
     let mut conn = client.get_connection_manager().await?;
-    let _: () = redis::pipe()
-        .atomic()
-        .del(room_members_key(room_id))
-        .ignore()
-        .del(room_meta_key(room_id))
-        .ignore()
-        .query_async(&mut conn)
-        .await?;
+    let _: usize = conn.del(room_members_key(room_id)).await?;
     Ok(())
 }
 
@@ -332,10 +296,10 @@ fn session_key(session_id: &str) -> String {
     format!("{SESSION_PREFIX}{session_id}")
 }
 
-fn room_meta_key(room_id: &str) -> String {
-    format!("{ROOM_PREFIX}{room_id}:meta")
+fn room_binding_key(room_id: &str) -> String {
+    format!("{ROOM_BINDING_PREFIX}{room_id}:binding")
 }
 
 fn room_members_key(room_id: &str) -> String {
-    format!("{ROOM_PREFIX}{room_id}:members")
+    format!("{ROOM_MEMBERS_PREFIX}{room_id}:members")
 }
