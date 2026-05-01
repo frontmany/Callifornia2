@@ -3,6 +3,7 @@ mod message;
 mod redis;
 mod token;
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -252,6 +253,7 @@ async fn handle_message(
                 .config
                 .signaling_by_id(&route.signaling_instance_id)
                 .ok_or(HandlerError::SignalingUnavailable)?;
+            ensure_signaling_instance_alive(state, signaling.id.as_str()).await?;
             let token = issue_signaling_token(
                 state,
                 &session_id,
@@ -305,6 +307,25 @@ async fn cleanup_connection(state: &State, context: &ConnectionContext) {
     }
 }
 
+async fn alive_signaling_ids(state: &State) -> Result<Vec<String>, HandlerError> {
+    redis::alive_signaling_nodes(&state.redis, state.config.signaling_stale_timeout)
+        .await
+        .map_err(map_redis_error)
+}
+
+async fn ensure_signaling_instance_alive(
+    state: &State,
+    signaling_instance_id: &str,
+) -> Result<(), HandlerError> {
+    let alive = alive_signaling_ids(state).await?;
+    let alive_set: HashSet<&str> = alive.iter().map(String::as_str).collect();
+    if alive_set.contains(signaling_instance_id) {
+        Ok(())
+    } else {
+        Err(HandlerError::SignalingUnavailable)
+    }
+}
+
 fn authenticated_context(context: &ConnectionContext) -> Result<(String, String), HandlerError> {
     Ok((
         context
@@ -321,11 +342,8 @@ async fn select_least_loaded_signaling(
     let loads = redis::load_signaling_loads(&state.redis)
         .await
         .map_err(map_redis_error)?;
-    let alive = redis::alive_signaling_nodes(&state.redis, state.config.signaling_stale_timeout)
-        .await
-        .map_err(map_redis_error)?;
-    let alive_set: std::collections::HashSet<&str> =
-        alive.iter().map(String::as_str).collect();
+    let alive = alive_signaling_ids(state).await?;
+    let alive_set: HashSet<&str> = alive.iter().map(String::as_str).collect();
 
     state
         .config
