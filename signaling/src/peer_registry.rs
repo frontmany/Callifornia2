@@ -1,12 +1,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 
 use crate::message::ServerMessage;
 
-type RoomPeers = HashMap<String, HashMap<String, UnboundedSender<ServerMessage>>>;
+#[derive(Clone)]
+struct PeerEntry {
+    sender: Sender<ServerMessage>,
+    sfu_addr: Option<String>,
+}
+
+type RoomPeers = HashMap<String, HashMap<String, PeerEntry>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryStatus {
@@ -25,13 +31,14 @@ impl PeerRegistry {
         &self,
         room_id: &str,
         nickname: &str,
-        sender: UnboundedSender<ServerMessage>,
+        sender: Sender<ServerMessage>,
+        sfu_addr: Option<String>,
     ) {
         let mut peers = self.inner.write().await;
         peers
             .entry(room_id.to_owned())
             .or_default()
-            .insert(nickname.to_owned(), sender);
+            .insert(nickname.to_owned(), PeerEntry { sender, sfu_addr });
     }
 
     pub async fn unregister(&self, room_id: &str, nickname: &str) {
@@ -57,14 +64,14 @@ impl PeerRegistry {
             peers
                 .get(room_id)
                 .and_then(|room_peers| room_peers.get(nickname))
-                .cloned()
+                .map(|entry| entry.sender.clone())
         };
 
         let Some(sender) = sender else {
             return DeliveryStatus::Missing;
         };
 
-        if sender.send(payload).is_err() {
+        if sender.try_send(payload).is_err() {
             return DeliveryStatus::Stale;
         }
 
@@ -86,13 +93,13 @@ impl PeerRegistry {
             room_peers
                 .iter()
                 .filter(|(nickname, _)| except_nickname != Some(nickname.as_str()))
-                .map(|(nickname, sender)| (nickname.clone(), sender.clone()))
+                .map(|(nickname, entry)| (nickname.clone(), entry.sender.clone()))
                 .collect::<Vec<_>>()
         };
 
         let mut stale_nicknames = Vec::new();
         for (nickname, sender) in targets {
-            if sender.send(payload.clone()).is_err() {
+            if sender.try_send(payload.clone()).is_err() {
                 stale_nicknames.push(nickname);
             }
         }
@@ -106,5 +113,25 @@ impl PeerRegistry {
             .iter()
             .map(|(room_id, room_peers)| (room_id.clone(), room_peers.keys().cloned().collect()))
             .collect()
+    }
+
+    pub async fn snapshot_rooms_with_sfu(
+        &self,
+    ) -> HashMap<String, Vec<(String, Option<String>)>> {
+        let peers = self.inner.read().await;
+        peers
+            .iter()
+            .map(|(room_id, room_peers)| {
+                let participants = room_peers
+                    .iter()
+                    .map(|(nickname, entry)| (nickname.clone(), entry.sfu_addr.clone()))
+                    .collect();
+                (room_id.clone(), participants)
+            })
+            .collect()
+    }
+
+    pub async fn clear(&self) {
+        self.inner.write().await.clear();
     }
 }

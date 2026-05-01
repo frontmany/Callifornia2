@@ -12,6 +12,7 @@ use pb::{
     AddIceCandidateRequest, CreatePeerRequest, DeletePeerRequest, HandleSdpRequest, SdpType,
     SfuEvent, SubscribeEventsRequest,
 };
+use rand::Rng;
 use tokio::sync::RwLock;
 use tonic::transport::{Channel, Endpoint};
 use tracing::{debug, error, info, warn};
@@ -19,8 +20,6 @@ use tracing::{debug, error, info, warn};
 use crate::message::{ServerErrorCode, ServerMessage};
 use crate::peer_registry::DeliveryStatus;
 use crate::state::State;
-
-const SFU_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct RemoteSdp {
@@ -34,6 +33,8 @@ pub enum SfuClientError {
     Transport(#[from] tonic::Status),
     #[error("failed to connect to SFU endpoint")]
     Connect(#[from] tonic::transport::Error),
+    #[error("SFU request timed out")]
+    Timeout,
     #[error("{0}")]
     Rejected(String),
 }
@@ -42,18 +43,67 @@ pub enum SfuClientError {
 pub struct Registry {
     signaling_id: String,
     connect_timeout: Duration,
+    rpc_timeout: Duration,
+    backoff_min: Duration,
+    backoff_max: Duration,
     clients: Arc<RwLock<HashMap<String, Channel>>>,
     listeners: Arc<RwLock<HashSet<String>>>,
 }
 
 impl Registry {
-    pub fn new(signaling_id: String, connect_timeout: Duration) -> Self {
+    pub fn new(
+        signaling_id: String,
+        connect_timeout: Duration,
+        rpc_timeout: Duration,
+        backoff_min: Duration,
+        backoff_max: Duration,
+    ) -> Self {
         Self {
             signaling_id,
             connect_timeout,
+            rpc_timeout,
+            backoff_min,
+            backoff_max,
             clients: Arc::new(RwLock::new(HashMap::new())),
             listeners: Arc::new(RwLock::new(HashSet::new())),
         }
+    }
+
+    async fn invalidate_channel(&self, sfu_addr: &str) {
+        self.clients.write().await.remove(sfu_addr);
+    }
+
+    async fn run_rpc<T, F, Fut>(
+        &self,
+        sfu_addr: &str,
+        op: F,
+    ) -> Result<T, SfuClientError>
+    where
+        F: FnOnce(SfuServiceClient<Channel>) -> Fut,
+        Fut: std::future::Future<Output = Result<tonic::Response<T>, tonic::Status>>,
+    {
+        let client = self.grpc_client(sfu_addr).await?;
+        match tokio::time::timeout(self.rpc_timeout, op(client)).await {
+            Ok(Ok(resp)) => Ok(resp.into_inner()),
+            Ok(Err(status)) => {
+                if matches!(
+                    status.code(),
+                    tonic::Code::Unavailable | tonic::Code::Cancelled | tonic::Code::DeadlineExceeded
+                ) {
+                    self.invalidate_channel(sfu_addr).await;
+                }
+                Err(SfuClientError::Transport(status))
+            }
+            Err(_) => {
+                self.invalidate_channel(sfu_addr).await;
+                Err(SfuClientError::Timeout)
+            }
+        }
+    }
+
+    pub async fn clear(&self) {
+        self.clients.write().await.clear();
+        self.listeners.write().await.clear();
     }
 
     pub async fn ensure_peer(
@@ -65,17 +115,14 @@ impl Registry {
     ) -> Result<(), SfuClientError> {
         self.ensure_listener(state.clone(), sfu_addr.to_owned())
             .await?;
+        let req = CreatePeerRequest {
+            peer_id: peer_id(room_id, nickname),
+            room_id: room_id.to_owned(),
+            signaling_id: self.signaling_id.clone(),
+        };
         let response = self
-            .grpc_client(sfu_addr)
-            .await?
-            .create_peer(CreatePeerRequest {
-                peer_id: peer_id(room_id, nickname),
-                room_id: room_id.to_owned(),
-                signaling_id: self.signaling_id.clone(),
-            })
-            .await?
-            .into_inner();
-
+            .run_rpc(sfu_addr, |mut client| async move { client.create_peer(req).await })
+            .await?;
         ensure_success(
             response.success,
             response.error_message,
@@ -90,15 +137,13 @@ impl Registry {
         nickname: &str,
         reason: &str,
     ) -> Result<(), SfuClientError> {
+        let req = DeletePeerRequest {
+            peer_id: peer_id(room_id, nickname),
+            reason: reason.to_owned(),
+        };
         let response = self
-            .grpc_client(sfu_addr)
-            .await?
-            .delete_peer(DeletePeerRequest {
-                peer_id: peer_id(room_id, nickname),
-                reason: reason.to_owned(),
-            })
-            .await?
-            .into_inner();
+            .run_rpc(sfu_addr, |mut client| async move { client.delete_peer(req).await })
+            .await?;
         ensure_success(
             response.success,
             response.error_message,
@@ -114,16 +159,14 @@ impl Registry {
         sdp: String,
         sdp_type: &str,
     ) -> Result<RemoteSdp, SfuClientError> {
+        let req = HandleSdpRequest {
+            peer_id: peer_id(room_id, nickname),
+            sdp,
+            r#type: parse_sdp_type(sdp_type) as i32,
+        };
         let response = self
-            .grpc_client(sfu_addr)
-            .await?
-            .handle_sdp(HandleSdpRequest {
-                peer_id: peer_id(room_id, nickname),
-                sdp,
-                r#type: parse_sdp_type(sdp_type) as i32,
-            })
-            .await?
-            .into_inner();
+            .run_rpc(sfu_addr, |mut client| async move { client.handle_sdp(req).await })
+            .await?;
 
         ensure_success(
             response.success,
@@ -145,16 +188,16 @@ impl Registry {
         candidate: String,
         sdp_mid: String,
     ) -> Result<(), SfuClientError> {
+        let req = AddIceCandidateRequest {
+            peer_id: peer_id(room_id, nickname),
+            candidate,
+            sdp_mid,
+        };
         let response = self
-            .grpc_client(sfu_addr)
-            .await?
-            .add_ice_candidate(AddIceCandidateRequest {
-                peer_id: peer_id(room_id, nickname),
-                candidate,
-                sdp_mid,
+            .run_rpc(sfu_addr, |mut client| async move {
+                client.add_ice_candidate(req).await
             })
-            .await?
-            .into_inner();
+            .await?;
 
         ensure_success(
             response.success,
@@ -204,17 +247,28 @@ impl Registry {
     }
 
     async fn run_event_listener(&self, state: State, sfu_addr: String) {
+        let mut delay = self.backoff_min;
         loop {
             match self.subscribe_events_once(&state, &sfu_addr).await {
-                Ok(()) => warn!(sfu_addr = %sfu_addr, "SFU event stream closed, reconnecting"),
-                Err(err) => error!(error = %err, sfu_addr = %sfu_addr, "SFU event stream failed"),
+                Ok(()) => {
+                    warn!(sfu_addr = %sfu_addr, "SFU event stream closed, reconnecting");
+                    delay = self.backoff_min;
+                }
+                Err(err) => {
+                    error!(error = %err, sfu_addr = %sfu_addr, "SFU event stream failed");
+                }
             }
+
+            self.invalidate_channel(&sfu_addr).await;
 
             state
                 .close_rooms_due_to_sfu_addr(&sfu_addr, "sfu connection lost; room closed")
                 .await;
 
-            tokio::time::sleep(SFU_RECONNECT_DELAY).await;
+            let jitter_ms = rand::thread_rng().gen_range(0..=delay.as_millis() as u64 / 2);
+            let total = delay + Duration::from_millis(jitter_ms);
+            tokio::time::sleep(total).await;
+            delay = std::cmp::min(delay * 2, self.backoff_max);
         }
     }
 
@@ -261,6 +315,7 @@ fn map_connect_error(err: SfuClientError) -> tonic::Status {
     match err {
         SfuClientError::Transport(status) => status,
         SfuClientError::Connect(err) => tonic::Status::unavailable(err.to_string()),
+        SfuClientError::Timeout => tonic::Status::deadline_exceeded("sfu rpc timed out"),
         SfuClientError::Rejected(message) => tonic::Status::failed_precondition(message),
     }
 }
@@ -308,6 +363,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
                 track_id = %track.track_id,
                 kind = %track.kind,
                 codec = %track.codec,
+                is_sending = track.is_sending,
                 "SFU track added"
             );
         }
@@ -316,6 +372,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
                 peer_id = %peer_id,
                 room_id = %room_id,
                 track_id = %track.track_id,
+                kind = %track.kind,
                 reason = %track.reason,
                 "SFU track removed"
             );

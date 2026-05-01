@@ -17,6 +17,17 @@ pub struct Config {
     pub ws_read_timeout: Duration,
     pub ws_write_timeout: Duration,
     pub heartbeat_interval: Duration,
+    pub redis_op_timeout: Duration,
+    pub room_manager_probe_interval: Duration,
+    pub room_manager_probe_timeout: Duration,
+    pub sfu_rpc_timeout: Duration,
+    pub sfu_backoff_min: Duration,
+    pub sfu_backoff_max: Duration,
+    pub peer_outbound_capacity: usize,
+    pub signaling_heartbeat: Duration,
+    pub session_lock_ttl: Duration,
+    pub nick_lease_ttl: Duration,
+    pub nick_lease_renew: Duration,
 }
 
 impl Config {
@@ -45,6 +56,30 @@ impl Config {
         let heartbeat_interval =
             duration_from_env("HEARTBEAT_INTERVAL_MS", 15_000).context("HEARTBEAT_INTERVAL_MS")?;
 
+        let redis_op_timeout =
+            duration_from_env("REDIS_OP_TIMEOUT_MS", 800).context("REDIS_OP_TIMEOUT_MS")?;
+        let room_manager_probe_interval =
+            duration_from_env("ROOM_MANAGER_PROBE_INTERVAL_MS", 1_000)
+                .context("ROOM_MANAGER_PROBE_INTERVAL_MS")?;
+        let room_manager_probe_timeout = duration_from_env("ROOM_MANAGER_PROBE_TIMEOUT_MS", 500)
+            .context("ROOM_MANAGER_PROBE_TIMEOUT_MS")?;
+        let sfu_rpc_timeout =
+            duration_from_env("SFU_RPC_TIMEOUT_MS", 5_000).context("SFU_RPC_TIMEOUT_MS")?;
+        let sfu_backoff_min =
+            duration_from_env("SFU_BACKOFF_MIN_MS", 1_000).context("SFU_BACKOFF_MIN_MS")?;
+        let sfu_backoff_max =
+            duration_from_env("SFU_BACKOFF_MAX_MS", 30_000).context("SFU_BACKOFF_MAX_MS")?;
+        let peer_outbound_capacity = usize_from_env_or("PEER_OUTBOUND_CHANNEL_CAPACITY", 256)
+            .context("PEER_OUTBOUND_CHANNEL_CAPACITY")?;
+        let signaling_heartbeat =
+            duration_from_secs_env("SIGNALING_HEARTBEAT_SEC", 5).context("SIGNALING_HEARTBEAT_SEC")?;
+        let session_lock_ttl =
+            duration_from_env("SESSION_LOCK_TTL_MS", 5_000).context("SESSION_LOCK_TTL_MS")?;
+        let nick_lease_ttl =
+            duration_from_secs_env("NICK_LEASE_TTL_SEC", 30).context("NICK_LEASE_TTL_SEC")?;
+        let nick_lease_renew =
+            duration_from_secs_env("NICK_LEASE_RENEW_SEC", 10).context("NICK_LEASE_RENEW_SEC")?;
+
         Ok(Self {
             signaling_addr,
             signaling_public_host,
@@ -57,6 +92,17 @@ impl Config {
             ws_read_timeout,
             ws_write_timeout,
             heartbeat_interval,
+            redis_op_timeout,
+            room_manager_probe_interval,
+            room_manager_probe_timeout,
+            sfu_rpc_timeout,
+            sfu_backoff_min,
+            sfu_backoff_max,
+            peer_outbound_capacity,
+            signaling_heartbeat,
+            session_lock_ttl,
+            nick_lease_ttl,
+            nick_lease_renew,
         })
     }
 
@@ -90,6 +136,27 @@ fn u16_from_env_or(key: &str, default: u16) -> Result<u16> {
             .parse()
             .with_context(|| format!("invalid integer for {key}: {value}")),
         Err(_) => Ok(default),
+    }
+}
+
+fn usize_from_env_or(key: &str, default: usize) -> Result<usize> {
+    match env::var(key) {
+        Ok(value) => value
+            .parse()
+            .with_context(|| format!("invalid integer for {key}: {value}")),
+        Err(_) => Ok(default),
+    }
+}
+
+fn duration_from_secs_env(key: &str, default_secs: u64) -> Result<Duration> {
+    match env::var(key) {
+        Ok(value) => {
+            let secs: u64 = value
+                .parse()
+                .with_context(|| format!("invalid integer for {key}: {value}"))?;
+            Ok(Duration::from_secs(secs))
+        }
+        Err(_) => Ok(Duration::from_secs(default_secs)),
     }
 }
 

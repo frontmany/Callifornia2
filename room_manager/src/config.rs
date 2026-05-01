@@ -10,8 +10,12 @@ pub struct Config {
     pub grpc_addr: String,
     pub redis_url: String,
     pub redis_connect_timeout: Duration,
+    pub redis_op_timeout: Duration,
     pub sfu_connect_timeout: Duration,
     pub health_interval: Duration,
+    pub janitor_interval: Duration,
+    pub signaling_stale_timeout: Duration,
+    pub sfu_provisioning_timeout: Duration,
     pub scale_down_idle_timeout: Duration,
     pub max_waiting_requests: usize,
     pub sfu_candidates: Vec<SfuCandidate>,
@@ -23,8 +27,12 @@ impl Config {
             grpc_addr: env_or("ROOM_MANAGER_ADDR", "0.0.0.0:50061"),
             redis_url: env_or("REDIS_URL", "redis://redis:6379/"),
             redis_connect_timeout: ms_env_or("REDIS_CONNECT_TIMEOUT_MS", 2_000)?,
+            redis_op_timeout: ms_env_or("REDIS_OP_TIMEOUT_MS", 800)?,
             sfu_connect_timeout: ms_env_or("SFU_CONNECT_TIMEOUT_MS", 2_000)?,
             health_interval: ms_env_or("ROOM_MANAGER_HEALTH_INTERVAL_MS", 5_000)?,
+            janitor_interval: secs_env_or("JANITOR_INTERVAL_SEC", 5)?,
+            signaling_stale_timeout: secs_env_or("SIGNALING_STALE_SEC", 30)?,
+            sfu_provisioning_timeout: secs_env_or("SFU_PROVISIONING_TIMEOUT_SEC", 60)?,
             scale_down_idle_timeout: ms_env_or("ROOM_MANAGER_SCALE_DOWN_IDLE_MS", 300_000)?,
             max_waiting_requests: usize_env_or("ROOM_MANAGER_MAX_WAITING_REQUESTS", 10_000)?,
             sfu_candidates: parse_candidates(&env_or("ROOM_MANAGER_SFU_CANDIDATES", ""))?,
@@ -38,6 +46,10 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn ms_env_or(key: &str, default_ms: u64) -> Result<Duration> {
     Ok(Duration::from_millis(u64_env_or(key, default_ms)?))
+}
+
+fn secs_env_or(key: &str, default_secs: u64) -> Result<Duration> {
+    Ok(Duration::from_secs(u64_env_or(key, default_secs)?))
 }
 
 fn usize_env_or(key: &str, default: usize) -> Result<usize> {

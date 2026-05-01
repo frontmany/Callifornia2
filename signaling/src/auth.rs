@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectorClaims {
+    #[serde(default)]
+    pub jti: String,
     pub session_id: String,
     pub nickname: String,
     pub signaling_instance_id: String,

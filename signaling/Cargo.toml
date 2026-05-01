@@ -27,6 +27,7 @@ dotenv = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 jsonwebtoken = { version = "10.3.0", features = ["hmac"] }
+rand = "0.8"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

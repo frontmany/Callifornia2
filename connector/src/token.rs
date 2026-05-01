@@ -2,9 +2,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectorClaims {
+    pub jti: String,
     pub session_id: String,
     pub nickname: String,
     pub signaling_instance_id: String,
@@ -28,6 +30,7 @@ pub fn issue_token(
         .unwrap_or_default()
         .as_secs();
     let claims = ConnectorClaims {
+        jti: Uuid::new_v4().to_string(),
         session_id,
         nickname,
         signaling_instance_id,

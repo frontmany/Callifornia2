@@ -38,7 +38,7 @@ service SFUService {
 message CreatePeerRequest {
     string peer_id = 1; // Уникальный ID клиента (генерируется Signaling)
     string room_id = 2; // ID комнаты
-    string signaling_id = 3;
+    string signaling_id = 3; // Идентификатор инстанса Signaling (для мульти-инстанса на SFU)
 }
 
 message CreatePeerResponse {
@@ -60,7 +60,7 @@ message DeletePeerResponse {
 // Сообщения для WebRTC сигналинга
 // -----------------------------------------------------------------------------
 enum SdpType {
-    SDP_TYPE_UNSPECIFIED = 0;
+    SDP_TYPE_UNSPECIFIED = 0; // Не задавать явно
     SDP_TYPE_OFFER = 1;
     SDP_TYPE_ANSWER = 2;
 }
@@ -97,6 +97,7 @@ message SubscribeEventsRequest {
     string signaling_id = 1;
 }
 
+// Ping: пустой запрос, в ответе только ok.
 message PingRequest {}
 
 message PingResponse {
@@ -121,52 +122,43 @@ message SFUEvent {
     }
 }
 
-// Когда WebRTC соединение между SFU и клиентом полностью установлено (ICE done)
-// Signaling может оповестить других участников, что этот клиент готов получать/отправлять медиа.
+// Когда WebRTC соединение между SFU и клиентом полностью установлено (ICE done).
+// Идентификатор пира — в SFUEvent.peer_id.
 message PeerConnectedEvent {
-    string peer_id = 1;
-    string transport_type = 2; // "udp", "tcp", "relay"
+    string transport_type = 1; // "udp", "tcp", "relay"
 }
 
-// Когда SFU теряет WebRTC соединение с клиентом (ICE timeout, закрытие, сетевые проблемы)
-// Signaling должен оповестить остальных участников комнаты, что клиент отключился.
+// Когда SFU теряет WebRTC соединение с клиентом (ICE timeout, закрытие, сетевые проблемы).
 message PeerDisconnectedEvent {
-    string peer_id = 1;
-    string reason = 2; // "timeout", "ice_failed", "closed", "network_error"
+    string reason = 1; // "timeout", "ice_failed", "closed", "network_error"
 }
 
-// Когда SFU получает новый медиа-трек от клиента (первый RTP пакет)
-// Signaling может использовать это для обновления информации об участнике (например, иконка камеры).
+// Когда SFU получает новый медиа-трек от клиента (первый RTP пакет).
 message TrackAddedEvent {
-    string peer_id = 1;
-    string track_id = 2;
-    string kind = 3; // "video" или "audio"
-    string codec = 4; // "H264", "VP8", "Opus"
-    bool is_sending = 6; // true если клиент отправляет, false если только принимает
+    string track_id = 1;
+    string kind = 2; // "video" или "audio"
+    string codec = 3; // "H264", "VP8", "Opus"
+    bool is_sending = 4; // true — клиент отправляет медиа по этому треку
 }
 
-// Когда клиент перестаёт отправлять трек (выключил камеру/микрофон или закрыл дорожку)
+// Когда клиент перестаёт отправлять трек (выключил камеру/микрофон или закрыл дорожку).
 message TrackRemovedEvent {
-    string peer_id = 1;
-    string track_id = 2;
-    string kind = 3;
-    string reason = 4; // "user_muted", "track_ended", "peer_disconnected"
+    string track_id = 1;
+    string kind = 2;
+    string reason = 3; // "user_muted", "track_ended", "peer_disconnected"
 }
 
-// Когда SFU генерирует ICE кандидата (в ответ на offer от клиента)
-// Signaling должен передать этого кандидата клиенту.
+// Когда SFU генерирует ICE кандидата (в ответ на offer от клиента).
 message ICECandidateEvent {
-    string peer_id = 1;
-    string candidate = 2;
-    string sdp_mid = 3;
+    string candidate = 1;
+    string sdp_mid = 2;
 }
 
-// Любая ошибка, которую SFU хочет сообщить Signaling (например, не удалось создать PeerConnection)
+// Любая ошибка, которую SFU хочет сообщить Signaling.
 message ErrorEvent {
-    string peer_id = 1;
-    string error_code = 2; // "NO_COMMON_CODEC", "ICE_FAILED", "RESOURCE_EXHAUSTED"
-    string error_message = 3;
-    bool is_fatal = 4; // Если true, клиент должен быть удалён
+    string error_code = 1; // "NO_COMMON_CODEC", "ICE_FAILED", "RESOURCE_EXHAUSTED"
+    string error_message = 2;
+    bool is_fatal = 3;
 }
 
 // Периодическое сообщение "я жив" от SFU к Signaling.

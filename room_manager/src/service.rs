@@ -11,7 +11,7 @@ use crate::storage::{
     assign_room_to_instance, count_active_rooms, decrement_sfu_room_load, delete_room_assignment,
     enqueue_waiting_request, get_room_assignment, has_provisioning_instance, list_sfu_instances,
     load_sfu_room_loads, register_provisioning_instance, select_least_loaded_instance,
-    waiting_request_count,
+    waiting_request_count, EnqueueError,
 };
 use crate::util::{internal_status, unix_now};
 
@@ -36,7 +36,6 @@ impl RoomManagerService for RoomManager {
             return Ok(Response::new(GetRoomResponse {
                 status: RoomBindingStatus::NotFound as i32,
                 room_id: request.room_id,
-                message: "room not found".to_owned(),
                 ..Default::default()
             }));
         }
@@ -58,7 +57,7 @@ impl RoomManagerService for RoomManager {
             return Ok(Response::new(build_room_response(assignment)));
         }
 
-        enqueue_waiting_request(
+        match enqueue_waiting_request(
             &self.state.redis,
             self.state.config.max_waiting_requests,
             WaitingRequestRecord {
@@ -70,7 +69,13 @@ impl RoomManagerService for RoomManager {
             },
         )
         .await
-        .map_err(internal_status)?;
+        {
+            Ok(()) => {}
+            Err(EnqueueError::QueueFull) => {
+                return Err(Status::resource_exhausted("queue_full"));
+            }
+            Err(EnqueueError::Other(err)) => return Err(internal_status(err)),
+        }
 
         if has_provisioning_instance(&self.state.redis)
             .await
@@ -97,7 +102,6 @@ impl RoomManagerService for RoomManager {
             signaling_owner_host: request.signaling_owner_host,
             signaling_owner_port: u32::from(owner_port),
             room_state: "allocating".to_owned(),
-            message: "no SFU capacity available yet; retry later".to_owned(),
             ..Default::default()
         }))
     }
@@ -111,10 +115,7 @@ impl RoomManagerService for RoomManager {
             .await
             .map_err(internal_status)?
         else {
-            return Ok(Response::new(CloseRoomResponse {
-                closed: false,
-                message: "room not found".to_owned(),
-            }));
+            return Ok(Response::new(CloseRoomResponse { closed: false }));
         };
 
         if let Some(instance_id) = assignment.sfu_instance_id.as_deref() {
@@ -126,10 +127,7 @@ impl RoomManagerService for RoomManager {
             .await
             .map_err(internal_status)?;
 
-        Ok(Response::new(CloseRoomResponse {
-            closed: true,
-            message: "room closed".to_owned(),
-        }))
+        Ok(Response::new(CloseRoomResponse { closed: true }))
     }
 
     async fn get_status(
@@ -189,6 +187,5 @@ fn build_room_response(assignment: RoomBinding) -> GetRoomResponse {
         signaling_owner_host: assignment.owner_host,
         signaling_owner_port: u32::from(assignment.owner_port),
         room_state: assignment.state,
-        message: String::new(),
     }
 }

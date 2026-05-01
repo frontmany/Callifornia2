@@ -1,13 +1,29 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::message::ServerMessage;
-use crate::peer_registry::{DeliveryStatus, PeerRegistry};
+use crate::peer_registry::PeerRegistry;
 use crate::redis::{self, RedisRoomError};
 use crate::room_manager::RoomManagerError;
 use crate::session_registry::SessionRegistry;
+
+#[derive(Debug, Clone, Copy)]
+pub enum DegradationReason {
+    RedisDown,
+    RoomManagerDown,
+}
+
+impl DegradationReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DegradationReason::RedisDown => "redis",
+            DegradationReason::RoomManagerDown => "room_manager",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceState {
@@ -39,6 +55,7 @@ pub struct State {
     pub peers: PeerRegistry,
     pub sessions: SessionRegistry,
     health: Arc<tokio::sync::RwLock<RuntimeHealth>>,
+    purging: Arc<AtomicBool>,
 }
 
 impl State {
@@ -58,6 +75,7 @@ impl State {
             peers,
             sessions,
             health: Arc::new(tokio::sync::RwLock::new(RuntimeHealth::default())),
+            purging: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -69,8 +87,84 @@ impl State {
         self.health.write().await.redis = state;
     }
 
+    pub async fn set_room_manager_state(&self, state: ServiceState) {
+        self.health.write().await.room_manager = state;
+    }
+
     pub async fn is_redis_available(&self) -> bool {
         self.health.read().await.redis == ServiceState::Ok
+    }
+
+    pub async fn is_healthy(&self) -> bool {
+        let h = self.health.read().await;
+        h.redis == ServiceState::Ok && h.room_manager == ServiceState::Ok
+    }
+
+    pub fn try_begin_purge(&self) -> bool {
+        self.purging
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    pub fn end_purge(&self) {
+        self.purging.store(false, Ordering::SeqCst);
+    }
+
+    pub async fn run_purge(&self, reason: DegradationReason) {
+        if !self.try_begin_purge() {
+            return;
+        }
+        warn!(reason = reason.as_str(), "purge protocol started");
+
+        let rooms = self.peers.snapshot_rooms_with_sfu().await;
+        let retry_after_ms: u32 = 5_000;
+        let dependency = reason.as_str().to_owned();
+
+        for (room_id, _participants) in &rooms {
+            self.peers
+                .broadcast_to_room(
+                    room_id,
+                    None,
+                    ServerMessage::ServiceUnavailable {
+                        dependency: dependency.clone(),
+                        retry_after_ms,
+                    },
+                )
+                .await;
+        }
+
+        for (room_id, participants) in &rooms {
+            for (nickname, sfu_addr) in participants {
+                if let Some(sfu_addr) = sfu_addr {
+                    if let Err(err) = self
+                        .sfu
+                        .delete_peer(sfu_addr, room_id, nickname, "signaling_purge")
+                        .await
+                    {
+                        warn!(
+                            error = %err,
+                            sfu_addr = %sfu_addr,
+                            room_id = %room_id,
+                            nickname = %nickname,
+                            "purge: failed best-effort SFU delete_peer"
+                        );
+                    }
+                }
+            }
+        }
+
+        self.peers.clear().await;
+        self.sessions.clear().await;
+        self.sfu.clear().await;
+
+        if matches!(reason, DegradationReason::RoomManagerDown) {
+            let node_id = self.config.public_node_id();
+            if let Err(err) = redis::remove_node_heartbeat(&self.redis, &node_id).await {
+                warn!(error = %err, "failed to remove node heartbeat during purge");
+            }
+        }
+
+        info!(reason = reason.as_str(), "purge protocol completed");
     }
 
     pub async fn detach_peer(&self, room_id: &str, nickname: &str, reason: &str) {
@@ -166,6 +260,13 @@ impl State {
                 if let Err(err) = self.room_manager.close_room(&room_id).await {
                     warn!(error = %err, room_id = %room_id, "failed to close room after sfu down");
                 }
+                if let Err(err) = redis::delete_room(&self.redis, &room_id).await {
+                    warn!(
+                        error = %err,
+                        room_id = %room_id,
+                        "failed to delete signaling room members after sfu down"
+                    );
+                }
                 for session_id in affected_sessions {
                     if let Err(err) = redis::session_set_room(&self.redis, &session_id, None).await
                     {
@@ -181,34 +282,6 @@ impl State {
         }
     }
 
-    pub async fn notify_participants_left(
-        &self,
-        room_id: &str,
-        nickname: &str,
-        participants: &[String],
-    ) {
-        for participant in participants {
-            if participant == nickname {
-                continue;
-            }
-            match self
-                .peers
-                .send_to_peer(
-                    room_id,
-                    participant,
-                    ServerMessage::ParticipantLeft {
-                        nickname: nickname.to_owned(),
-                    },
-                )
-                .await
-            {
-                DeliveryStatus::Delivered | DeliveryStatus::Missing => {}
-                DeliveryStatus::Stale => {
-                    self.peers.unregister(room_id, participant).await;
-                }
-            }
-        }
-    }
 }
 
 impl From<RoomManagerError> for ServiceState {

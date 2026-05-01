@@ -133,4 +133,10 @@ impl SessionRegistry {
     pub async fn clear_room(&self, room_id: &str) -> Vec<String> {
         self.inner.write().await.clear_room(room_id)
     }
+
+    pub async fn clear(&self) {
+        let mut store = self.inner.write().await;
+        store.by_session_id.clear();
+        store.by_room_id.clear();
+    }
 }

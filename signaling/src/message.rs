@@ -18,6 +18,7 @@ pub enum ServerErrorCode {
     RoomNotReady,
     TransferUnavailable,
     SfuUnavailable,
+    ServiceUnavailable,
     Internal,
 }
 
@@ -105,6 +106,10 @@ pub enum ServerMessage {
     Error {
         code: ServerErrorCode,
         message: String,
+    },
+    ServiceUnavailable {
+        dependency: String,
+        retry_after_ms: u32,
     },
 }
 

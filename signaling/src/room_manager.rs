@@ -3,7 +3,7 @@ pub mod pb {
 }
 
 use pb::room_manager_service_client::RoomManagerServiceClient;
-use pb::{CloseRoomRequest, GetRoomRequest, RoomBindingStatus};
+use pb::{CloseRoomRequest, GetRoomRequest, GetStatusRequest, RoomBindingStatus};
 use tonic::transport::Channel;
 
 #[derive(Debug, Clone)]
@@ -84,6 +84,15 @@ impl Client {
             .await?
             .into_inner();
         Ok(response.closed)
+    }
+
+    pub async fn get_status(&self) -> Result<(), RoomManagerError> {
+        let _ = self
+            .grpc_client()
+            .get_status(GetStatusRequest {})
+            .await?
+            .into_inner();
+        Ok(())
     }
 
     fn grpc_client(&self) -> RoomManagerServiceClient<Channel> {
