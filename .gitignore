@@ -31,6 +31,13 @@
 # --- vcpkg / conan (если появятся локально) ---
 vcpkg_installed/
 
+# --- SFU: локальный prebuilt OpenSSL (скрипт bootstrap-openssl.ps1) ---
+sfu/vendor/openssl/
+sfu/vendor/OpenSSL-Win64/
+
+# --- SFU: protoc/gRPC codegen (cmake writes here; run build once) ---
+sfu/generated/
+
 # --- Логи и временные файлы ---
 *.log
 *.tmp

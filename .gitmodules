@@ -1,0 +1,6 @@
+[submodule "sfu/vendor/libdatachannel"]
+	path = sfu/vendor/libdatachannel
+	url = https://github.com/paullouisageneau/libdatachannel.git
+[submodule "sfu/vendor/grpc"]
+	path = sfu/vendor/grpc
+	url = https://github.com/grpc/grpc.git
