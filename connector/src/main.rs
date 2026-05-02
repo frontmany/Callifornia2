@@ -66,11 +66,13 @@ enum HandlerError {
     #[error("room not found")]
     RoomNotFound,
     #[error("redis operation failed")]
-    Redis,
-    #[error("signaling instance is unavailable")]
-    SignalingUnavailable,
+    StorageUnavailable,
+    #[error("no healthy signaling instance")]
+    NoHealthySignaling,
+    #[error("signaling instance not in connector config")]
+    UnknownSignalingRoute,
     #[error("failed to issue connector token")]
-    Token,
+    TokenIssueFailed,
     #[error("failed to send websocket message")]
     WriteFailed,
 }
@@ -252,7 +254,7 @@ async fn handle_message(
             let signaling = state
                 .config
                 .signaling_by_id(&route.signaling_instance_id)
-                .ok_or(HandlerError::SignalingUnavailable)?;
+                .ok_or(HandlerError::UnknownSignalingRoute)?;
             ensure_signaling_instance_alive(state, signaling.id.as_str()).await?;
             let token = issue_signaling_token(
                 state,
@@ -322,7 +324,7 @@ async fn ensure_signaling_instance_alive(
     if alive_set.contains(signaling_instance_id) {
         Ok(())
     } else {
-        Err(HandlerError::SignalingUnavailable)
+        Err(HandlerError::NoHealthySignaling)
     }
 }
 
@@ -357,7 +359,7 @@ async fn select_least_loaded_signaling(
                 .partial_cmp(&right_load)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .ok_or(HandlerError::SignalingUnavailable)
+        .ok_or(HandlerError::NoHealthySignaling)
 }
 
 fn issue_signaling_token(
@@ -377,7 +379,7 @@ fn issue_signaling_token(
         intent.to_owned(),
         room_id,
     )
-    .map_err(|_| HandlerError::Token)
+    .map_err(|_| HandlerError::TokenIssueFailed)
 }
 
 async fn send_message(
@@ -415,7 +417,7 @@ fn map_redis_error(err: redis::RedisError) -> HandlerError {
         redis::RedisError::RoomNotFound => HandlerError::RoomNotFound,
         redis::RedisError::InvalidRoomRoute
         | redis::RedisError::Timeout
-        | redis::RedisError::Redis(_) => HandlerError::Redis,
+        | redis::RedisError::Redis(_) => HandlerError::StorageUnavailable,
     }
 }
 
@@ -424,13 +426,23 @@ fn map_error(err: &HandlerError) -> (ServerErrorCode, &'static str) {
         HandlerError::Unauthorized => (ServerErrorCode::Unauthorized, "Unauthorized"),
         HandlerError::NicknameTaken => (ServerErrorCode::NicknameTaken, "Nickname already taken"),
         HandlerError::RoomNotFound => (ServerErrorCode::RoomNotFound, "Room not found"),
-        HandlerError::Redis => (ServerErrorCode::Internal, "Redis operation failed"),
-        HandlerError::SignalingUnavailable => (
-            ServerErrorCode::Internal,
-            "Signaling instance is unavailable",
+        HandlerError::StorageUnavailable => (
+            ServerErrorCode::StorageUnavailable,
+            "Storage operation failed",
         ),
-        HandlerError::Token => (ServerErrorCode::Internal, "Failed to issue token"),
-        HandlerError::WriteFailed => (ServerErrorCode::Internal, "Failed to send message"),
+        HandlerError::NoHealthySignaling => (
+            ServerErrorCode::NoHealthySignaling,
+            "No healthy signaling instance",
+        ),
+        HandlerError::UnknownSignalingRoute => (
+            ServerErrorCode::UnknownSignalingRoute,
+            "Signaling route is not configured on this connector",
+        ),
+        HandlerError::TokenIssueFailed => (
+            ServerErrorCode::TokenIssueFailed,
+            "Failed to issue token",
+        ),
+        HandlerError::WriteFailed => (ServerErrorCode::WriteFailed, "Failed to send message"),
     }
 }
 

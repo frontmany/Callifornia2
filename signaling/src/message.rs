@@ -2,24 +2,45 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Wire codes for `ServerMessage::Error` on the signaling WebSocket API.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerErrorCode {
+    // --- Protocol ---
     InvalidJson,
     InvalidPayload,
-    RoomNotFound,
-    NicknameTaken,
+
+    // --- Auth / session ---
     Unauthorized,
     SessionConflict,
     AlreadyAuthorized,
     LeaveRoomMismatch,
+
+    // --- Room / presence ---
+    RoomNotFound,
+    NicknameTaken,
     AlreadyInRoom,
     NotInRoom,
+    /// Room binding exists but SFU assignment is still in progress (retry).
     RoomNotReady,
     TransferUnavailable,
+
+    // --- Media path ---
     SfuUnavailable,
-    ServiceUnavailable,
-    Internal,
+    SfuRejected,
+
+    // --- Control plane & storage (node is healthy; single operation failed) ---
+    /// Room Manager gRPC unreachable or error (not "pending assignment").
+    ControlPlaneUnavailable,
+    /// Room coordinator signaled queue / capacity exhaustion.
+    CoordinatorQueueFull,
+    /// Unexpected or inconsistent data from room manager (e.g. bad port in response).
+    InvalidRoomAssignment,
+    /// Redis timeout or error while the node is not in global degraded purge.
+    StorageUnavailable,
+
+    /// Failed to write an outbound WebSocket frame (client gone or I/O error).
+    WriteFailed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +128,7 @@ pub enum ServerMessage {
         code: ServerErrorCode,
         message: String,
     },
+    /// Node-wide degradation (Redis or room_manager down); sent before connections are closed.
     ServiceUnavailable {
         dependency: String,
         retry_after_ms: u32,

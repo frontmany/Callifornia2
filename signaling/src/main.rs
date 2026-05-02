@@ -236,7 +236,7 @@ async fn heartbeat_loop(state: State) {
 
     loop {
         interval.tick().await;
-        if !state.is_redis_available().await {
+        if !state.is_healthy().await {
             continue;
         }
         let now = std::time::SystemTime::now()

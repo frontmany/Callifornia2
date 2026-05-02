@@ -5,6 +5,7 @@ use axum::response::IntoResponse;
 use futures_util::StreamExt;
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tonic::Code;
 use tokio::time::timeout;
 use tracing::warn;
 use uuid::Uuid;
@@ -61,8 +62,14 @@ enum WsHandlerError {
     RedisError,
     #[error("room transfer target is unavailable")]
     TransferUnavailable,
-    #[error("room is not ready")]
+    #[error("room assignment still pending")]
     RoomNotReady,
+    #[error("room manager unavailable")]
+    ControlPlaneUnavailable,
+    #[error("room coordinator queue full")]
+    CoordinatorQueueFull,
+    #[error("invalid room assignment from coordinator")]
+    InvalidRoomAssignment,
     #[error("sfu is unavailable")]
     SfuUnavailable,
     #[error("sfu rejected signaling request")]
@@ -543,7 +550,7 @@ fn log_write_failure(err: anyhow::Error) -> WsHandlerError {
 
 fn map_error(err: &WsHandlerError) -> (ServerErrorCode, &'static str) {
     match err {
-        WsHandlerError::WriteFailed => (ServerErrorCode::Internal, "Failed to send message"),
+        WsHandlerError::WriteFailed => (ServerErrorCode::WriteFailed, "Failed to send message"),
         WsHandlerError::AlreadyAuthorized => (
             ServerErrorCode::AlreadyAuthorized,
             "Connection is already authorized",
@@ -570,7 +577,22 @@ fn map_error(err: &WsHandlerError) -> (ServerErrorCode, &'static str) {
             ServerErrorCode::RoomNotReady,
             "Room is still being assigned to an SFU; retry later",
         ),
-        WsHandlerError::RedisError => (ServerErrorCode::Internal, "Redis operation failed"),
+        WsHandlerError::ControlPlaneUnavailable => (
+            ServerErrorCode::ControlPlaneUnavailable,
+            "Room coordinator is unavailable",
+        ),
+        WsHandlerError::CoordinatorQueueFull => (
+            ServerErrorCode::CoordinatorQueueFull,
+            "Room coordinator queue is full; retry later",
+        ),
+        WsHandlerError::InvalidRoomAssignment => (
+            ServerErrorCode::InvalidRoomAssignment,
+            "Invalid room assignment from coordinator",
+        ),
+        WsHandlerError::RedisError => (
+            ServerErrorCode::StorageUnavailable,
+            "Storage operation failed",
+        ),
         WsHandlerError::TransferUnavailable => (
             ServerErrorCode::TransferUnavailable,
             "Room transfer target is unavailable",
@@ -580,9 +602,10 @@ fn map_error(err: &WsHandlerError) -> (ServerErrorCode, &'static str) {
             "Connection is not joined to this room",
         ),
         WsHandlerError::SfuUnavailable => (ServerErrorCode::SfuUnavailable, "SFU is unavailable"),
-        WsHandlerError::SfuRejected => {
-            (ServerErrorCode::Internal, "SFU rejected signaling request")
-        }
+        WsHandlerError::SfuRejected => (
+            ServerErrorCode::SfuRejected,
+            "SFU rejected signaling request",
+        ),
     }
 }
 
@@ -632,9 +655,11 @@ fn map_sfu_error(err: SfuClientError) -> WsHandlerError {
 
 fn map_room_manager_error(err: RoomManagerError) -> WsHandlerError {
     match err {
-        RoomManagerError::Transport(_) | RoomManagerError::InvalidAssignment => {
-            WsHandlerError::RoomNotReady
-        }
+        RoomManagerError::InvalidAssignment => WsHandlerError::InvalidRoomAssignment,
+        RoomManagerError::Transport(status) => match status.code() {
+            Code::ResourceExhausted => WsHandlerError::CoordinatorQueueFull,
+            _ => WsHandlerError::ControlPlaneUnavailable,
+        },
     }
 }
 
