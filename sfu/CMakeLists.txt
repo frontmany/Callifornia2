@@ -127,7 +127,7 @@ endif()
 set(LIBDATACHANNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libdatachannel")
 if(NOT EXISTS "${LIBDATACHANNEL_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
-        "libdatachannel not found at ${LIBDATACHANNEL_DIR}.\n"
+        "libdatachannel not found at ${LIBDATACHANNEL_DIR}.\n" 
         "From repository root run:\n"
         "  git submodule update --init --recursive sfu/vendor/libdatachannel\n")
 endif()

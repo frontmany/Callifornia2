@@ -10,16 +10,14 @@
 #include "absl/log/initialize.h"
 #include "sfu_service_impl.h"
 
-namespace {
-
-std::string ListenAddrFromEnv() {
+std::string listenAddrFromEnv() {
     if (const char* e = std::getenv("SFU_GRPC_ADDR")) {
         return std::string(e);
     }
     return "0.0.0.0:50051";
 }
 
-void RunServer(const std::string& listen_addr) {
+void runServer(const std::string& listen_addr) {
     SfuServiceImpl service;
 
     grpc::EnableDefaultHealthCheckService(true);
@@ -28,22 +26,21 @@ void RunServer(const std::string& listen_addr) {
     grpc::ServerBuilder builder;
     builder.AddListeningPort(listen_addr, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+
     if (!server) {
         std::cerr << "BuildAndStart failed for " << listen_addr << "\n";
         std::exit(1);
     }
+
     std::cerr << "SFU gRPC listening on " << listen_addr << "\n";
     server->Wait();
 }
 
-}
-
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
     absl::InitializeLog();
-    (void)argc;
-    (void)argv;
 
-    RunServer(ListenAddrFromEnv());
+    runServer(listenAddrFromEnv());
     return 0;
 }
