@@ -2,14 +2,16 @@
 
 #include <chrono>
 #include <grpcpp/grpcpp.h>
+#include <memory>
 
 #include "signaling.grpc.pb.h"
 
-// Skeleton SFU gRPC service. libdatachannel PeerConnection wiring goes in the .cpp
-// (CreatePeer / HandleSDP / ICE / track callbacks) and feeds SFUEvent via a shared hub.
+class SfuRuntime;
 
 class SfuServiceImpl final : public sfu::SFUService::Service {
 public:
+    explicit SfuServiceImpl(std::shared_ptr<SfuRuntime> runtime);
+
     grpc::Status CreatePeer(grpc::ServerContext* context,
                             const sfu::CreatePeerRequest* request,
                             sfu::CreatePeerResponse* response) override;
@@ -35,5 +37,6 @@ public:
                       sfu::PingResponse* response) override;
 
 private:
-    static constexpr std::chrono::seconds kHeartbeatInterval{15};
+    std::shared_ptr<SfuRuntime> m_runtime;
+    static constexpr std::chrono::seconds m_heartbeatInterval{15};
 };

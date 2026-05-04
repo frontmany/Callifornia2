@@ -36,8 +36,8 @@ service SFUService {
 // Сообщения для управления пирами
 // -----------------------------------------------------------------------------
 message CreatePeerRequest {
-    string peer_id = 1; // Уникальный ID клиента (генерируется Signaling)
-    string room_id = 2; // ID комнаты
+    string room_id = 1;
+    string participant_id = 2; // Логический участник (например nickname); в системе глобально уникален (резерв в Redis)
     string signaling_id = 3; // Идентификатор инстанса Signaling (для мульти-инстанса на SFU)
 }
 
@@ -47,8 +47,9 @@ message CreatePeerResponse {
 }
 
 message DeletePeerRequest {
-    string peer_id = 1;
-    string reason = 2; // "user_left", "signaling_disconnected", etc.
+    string room_id = 1;
+    string participant_id = 2;
+    string reason = 3; // "user_left", "signaling_disconnected", etc.
 }
 
 message DeletePeerResponse {
@@ -66,9 +67,10 @@ enum SdpType {
 }
 
 message HandleSDPRequest {
-    string peer_id = 1;
-    string sdp = 2; // Полный SDP текст
-    SdpType type = 3; // offer или answer
+    string room_id = 1;
+    string participant_id = 2;
+    string sdp = 3; // Полный SDP текст
+    SdpType type = 4; // offer или answer
 }
 
 message HandleSDPResponse {
@@ -79,9 +81,10 @@ message HandleSDPResponse {
 }
 
 message AddICECandidateRequest {
-    string peer_id = 1;
-    string candidate = 2; // Строка ICE кандидата
-    string sdp_mid = 3;
+    string room_id = 1;
+    string participant_id = 2;
+    string candidate = 3; // Строка ICE кандидата
+    string sdp_mid = 4;
 }
 
 message AddICECandidateResponse {
@@ -108,8 +111,8 @@ message PingResponse {
 // События, которые SFU отправляет Signaling (через server streaming)
 // -----------------------------------------------------------------------------
 message SFUEvent {
-    string peer_id = 1; // К кому относится событие
-    string room_id = 2;
+    string room_id = 1;
+    string participant_id = 2; // Участник, к которому относится событие
     
     oneof event {
         PeerConnectedEvent peer_connected = 3;
@@ -123,7 +126,7 @@ message SFUEvent {
 }
 
 // Когда WebRTC соединение между SFU и клиентом полностью установлено (ICE done).
-// Идентификатор пира — в SFUEvent.peer_id.
+// room_id и participant_id — в корне SFUEvent.
 message PeerConnectedEvent {
     string transport_type = 1; // "udp", "tcp", "relay"
 }

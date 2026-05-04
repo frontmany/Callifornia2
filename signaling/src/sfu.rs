@@ -116,8 +116,8 @@ impl Registry {
         self.ensure_listener(state.clone(), sfu_addr.to_owned())
             .await?;
         let req = CreatePeerRequest {
-            peer_id: peer_id(room_id, nickname),
             room_id: room_id.to_owned(),
+            participant_id: nickname.to_owned(),
             signaling_id: self.signaling_id.clone(),
         };
         let response = self
@@ -138,7 +138,8 @@ impl Registry {
         reason: &str,
     ) -> Result<(), SfuClientError> {
         let req = DeletePeerRequest {
-            peer_id: peer_id(room_id, nickname),
+            room_id: room_id.to_owned(),
+            participant_id: nickname.to_owned(),
             reason: reason.to_owned(),
         };
         let response = self
@@ -160,7 +161,8 @@ impl Registry {
         sdp_type: &str,
     ) -> Result<RemoteSdp, SfuClientError> {
         let req = HandleSdpRequest {
-            peer_id: peer_id(room_id, nickname),
+            room_id: room_id.to_owned(),
+            participant_id: nickname.to_owned(),
             sdp,
             r#type: parse_sdp_type(sdp_type) as i32,
         };
@@ -189,7 +191,8 @@ impl Registry {
         sdp_mid: String,
     ) -> Result<(), SfuClientError> {
         let req = AddIceCandidateRequest {
-            peer_id: peer_id(room_id, nickname),
+            room_id: room_id.to_owned(),
+            participant_id: nickname.to_owned(),
             candidate,
             sdp_mid,
         };
@@ -322,16 +325,15 @@ fn map_connect_error(err: SfuClientError) -> tonic::Status {
 
 async fn handle_sfu_event(state: &State, event: SfuEvent) {
     let SfuEvent {
-        peer_id,
         room_id,
+        participant_id,
         event,
     } = event;
-    let (_, nickname_from_peer_id) = split_peer_id(&peer_id);
 
     match event {
         Some(Event::PeerConnected(connected)) => {
             info!(
-                peer_id = %peer_id,
+                participant_id = %participant_id,
                 room_id = %room_id,
                 transport = %connected.transport_type,
                 "SFU peer connected"
@@ -339,18 +341,18 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
         }
         Some(Event::PeerDisconnected(disconnected)) => {
             warn!(
-                peer_id = %peer_id,
+                participant_id = %participant_id,
                 room_id = %room_id,
                 reason = %disconnected.reason,
                 "SFU peer disconnected"
             );
-            if let Some(nickname) = nickname_from_peer_id {
+            if !participant_id.is_empty() {
                 broadcast_to_room(
                     state,
                     &room_id,
-                    Some(&nickname),
+                    Some(participant_id.as_str()),
                     ServerMessage::ParticipantLeft {
-                        nickname: nickname.clone(),
+                        nickname: participant_id.clone(),
                     },
                 )
                 .await;
@@ -358,7 +360,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
         }
         Some(Event::TrackAdded(track)) => {
             info!(
-                peer_id = %peer_id,
+                participant_id = %participant_id,
                 room_id = %room_id,
                 track_id = %track.track_id,
                 kind = %track.kind,
@@ -369,7 +371,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
         }
         Some(Event::TrackRemoved(track)) => {
             info!(
-                peer_id = %peer_id,
+                participant_id = %participant_id,
                 room_id = %room_id,
                 track_id = %track.track_id,
                 kind = %track.kind,
@@ -379,7 +381,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
         }
         Some(Event::IceCandidate(candidate)) => {
             debug!(
-                peer_id = %peer_id,
+                participant_id = %participant_id,
                 room_id = %room_id,
                 sdp_mid = %candidate.sdp_mid,
                 "SFU emitted ICE candidate event"
@@ -387,7 +389,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
             send_to_peer(
                 state,
                 &room_id,
-                &peer_id,
+                &participant_id,
                 ServerMessage::Candidate {
                     from: "sfu".to_owned(),
                     candidate: candidate.candidate,
@@ -398,7 +400,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
         }
         Some(Event::Error(err)) => {
             error!(
-                peer_id = %peer_id,
+                participant_id = %participant_id,
                 room_id = %room_id,
                 code = %err.error_code,
                 fatal = err.is_fatal,
@@ -408,7 +410,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
             send_to_peer(
                 state,
                 &room_id,
-                &peer_id,
+                &participant_id,
                 ServerMessage::Error {
                     code: ServerErrorCode::SfuUnavailable,
                     message: err.error_message,
@@ -425,31 +427,50 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
             );
         }
         None => {
-            debug!(peer_id = %peer_id, room_id = %room_id, "Received empty SFU event");
+            debug!(
+                participant_id = %participant_id,
+                room_id = %room_id,
+                "Received empty SFU event"
+            );
         }
     }
 }
 
-async fn send_to_peer(state: &State, room_id: &str, peer_id: &str, payload: ServerMessage) {
-    let (_, Some(nickname)) = split_peer_id(peer_id) else {
-        warn!(peer_id = %peer_id, "unable to route SFU event: invalid peer_id format");
+async fn send_to_peer(
+    state: &State,
+    room_id: &str,
+    participant_id: &str,
+    payload: ServerMessage,
+) {
+    if participant_id.is_empty() {
+        warn!("unable to route SFU event: empty participant_id");
         return;
-    };
+    }
 
-    match state.peers.send_to_peer(room_id, &nickname, payload).await {
+    match state
+        .peers
+        .send_to_peer(room_id, participant_id, payload)
+        .await
+    {
         DeliveryStatus::Delivered => {}
         DeliveryStatus::Missing => {
-            debug!(room_id = %room_id, nickname = %nickname, "peer not connected locally");
+            debug!(
+                room_id = %room_id,
+                participant_id = %participant_id,
+                "peer not connected locally"
+            );
         }
         DeliveryStatus::Stale => {
-            state.detach_peer(room_id, &nickname, "stale_sender").await;
+            state
+                .detach_peer(room_id, participant_id, "stale_sender")
+                .await;
             let stale = state
                 .peers
                 .broadcast_to_room(
                     room_id,
-                    Some(&nickname),
+                    Some(participant_id),
                     ServerMessage::ParticipantLeft {
-                        nickname: nickname.clone(),
+                        nickname: participant_id.to_owned(),
                     },
                 )
                 .await;
@@ -479,13 +500,6 @@ async fn broadcast_to_room(
     }
 }
 
-fn split_peer_id(peer_id: &str) -> (Option<String>, Option<String>) {
-    match peer_id.split_once(':') {
-        Some((room_id, nickname)) => (Some(room_id.to_owned()), Some(nickname.to_owned())),
-        None => (None, None),
-    }
-}
-
 fn parse_sdp_type(value: &str) -> SdpType {
     match value {
         "offer" => SdpType::Offer,
@@ -502,6 +516,3 @@ fn format_sdp_type(value: i32) -> String {
     }
 }
 
-fn peer_id(room_id: &str, nickname: &str) -> String {
-    format!("{room_id}:{nickname}")
-}

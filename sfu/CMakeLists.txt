@@ -157,6 +157,11 @@ set(DATACHANNEL_TARGET datachannel)
 set(SFU_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/sfu_service_impl.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sfu_runtime.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/room.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/peer_session.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/event_router.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ice_config.cpp"
 )
 
 add_executable(${PROJECT_NAME} ${SFU_SOURCES})
