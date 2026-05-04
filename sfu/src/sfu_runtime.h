@@ -24,17 +24,8 @@ public:
 
     bool removePeer(const std::string& roomId, const std::string& participantId);
 
-    std::size_t activePeerCount() const;
-    std::size_t activeRoomCount() const;
-
-    bool sendEvent(const std::string& roomId,
-                   const std::string& participantId,
-                   const sfu::SFUEvent& event) const;
-
     std::shared_ptr<EventRouter> eventRouter() const { return m_eventRouter; }
 
-    std::optional<std::string> findSignalingId(const std::string& roomId,
-                                                const std::string& participantId) const;
     std::shared_ptr<PeerSession> findPeerSession(const std::string& roomId,
                                                   const std::string& participantId) const;
 

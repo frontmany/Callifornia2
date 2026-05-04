@@ -80,10 +80,13 @@ grpc::Status SfuServiceImpl::HandleSDP(grpc::ServerContext* context,
         return grpc::Status::OK;
     }
 
-    std::optional<std::string> answer = session->applyRemoteOffer(request->sdp());
+    std::string offerError;
+    std::optional<std::string> answer = session->applyRemoteOffer(request->sdp(), offerError);
     if (!answer) {
         response->set_success(false);
-        response->set_error_message("failed to apply offer or timed out waiting for answer");
+        response->set_error_message(
+            offerError.empty() ? "failed to apply offer or timed out waiting for answer"
+                               : offerError);
         response->set_type(sfu::SdpType::SDP_TYPE_UNSPECIFIED);
         return grpc::Status::OK;
     }

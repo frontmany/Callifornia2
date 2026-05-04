@@ -1,5 +1,7 @@
 #include "event_router.h"
 
+#include "absl/log/log.h"
+
 void EventRouter::registerSignaling(const std::string& signalingId,
                                     const std::shared_ptr<EventRouter::Subscriber>& sub) {
     std::deque<sfu::SFUEvent> pendingBatch;
@@ -17,7 +19,11 @@ void EventRouter::registerSignaling(const std::string& signalingId,
     for (const auto& ev : pendingBatch) {
         std::lock_guard wlock(subCopy->m_writeMutex);
         if (subCopy->m_writer != nullptr) {
-            subCopy->m_writer->Write(ev);
+            if (!subCopy->m_writer->Write(ev)) {
+                ABSL_LOG(WARNING) << "Failed to flush pending SFU event for signaling_id="
+                                  << signalingId;
+                break;
+            }
         }
     }
 }
@@ -40,6 +46,9 @@ bool EventRouter::routeEvent(const std::string& signalingId, const sfu::SFUEvent
             auto& q = m_pending[signalingId];
             q.push_back(event);
             while (q.size() > maxPendingEvents) {
+                ABSL_LOG(WARNING) << "Dropping oldest pending SFU event due to queue overflow"
+                                  << " signaling_id=" << signalingId
+                                  << " max_pending=" << maxPendingEvents;
                 q.pop_front();
             }
             return true;
