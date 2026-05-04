@@ -248,10 +248,12 @@ impl State {
 
             for nickname in participants {
                 self.peers.unregister(&room_id, &nickname).await;
+                self.sfu.cleanup_local_peer_state(&room_id, &nickname).await;
             }
 
             for nickname in stale {
                 self.peers.unregister(&room_id, &nickname).await;
+                self.sfu.cleanup_local_peer_state(&room_id, &nickname).await;
             }
 
             let affected_sessions = self.sessions.clear_room(&room_id).await;

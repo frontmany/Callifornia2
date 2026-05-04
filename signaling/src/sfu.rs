@@ -94,6 +94,10 @@ impl Registry {
         self.last_offer_ice_ufrag.write().await.remove(&key);
     }
 
+    pub async fn cleanup_local_peer_state(&self, room_id: &str, nickname: &str) {
+        self.cleanup_peer_sdp_state(room_id, nickname).await;
+    }
+
     async fn invalidate_channel(&self, sfu_addr: &str) {
         self.clients.write().await.remove(sfu_addr);
     }
