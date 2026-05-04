@@ -71,8 +71,8 @@ impl Config {
             duration_from_env("SFU_BACKOFF_MAX_MS", 30_000).context("SFU_BACKOFF_MAX_MS")?;
         let peer_outbound_capacity = usize_from_env_or("PEER_OUTBOUND_CHANNEL_CAPACITY", 256)
             .context("PEER_OUTBOUND_CHANNEL_CAPACITY")?;
-        let signaling_heartbeat =
-            duration_from_secs_env("SIGNALING_HEARTBEAT_SEC", 5).context("SIGNALING_HEARTBEAT_SEC")?;
+        let signaling_heartbeat = duration_from_secs_env("SIGNALING_HEARTBEAT_SEC", 5)
+            .context("SIGNALING_HEARTBEAT_SEC")?;
         let session_lock_ttl =
             duration_from_env("SESSION_LOCK_TTL_MS", 5_000).context("SESSION_LOCK_TTL_MS")?;
         let nick_lease_ttl =

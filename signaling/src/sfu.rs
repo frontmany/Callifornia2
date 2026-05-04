@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use pb::sfu_event::Event;
+use pb::sfu_event::Detail as SfuEventDetail;
 use pb::sfu_service_client::SfuServiceClient;
 use pb::{
     AddIceCandidateRequest, CreatePeerRequest, DeletePeerRequest, HandleSdpRequest, SdpType,
@@ -73,11 +73,7 @@ impl Registry {
         self.clients.write().await.remove(sfu_addr);
     }
 
-    async fn run_rpc<T, F, Fut>(
-        &self,
-        sfu_addr: &str,
-        op: F,
-    ) -> Result<T, SfuClientError>
+    async fn run_rpc<T, F, Fut>(&self, sfu_addr: &str, op: F) -> Result<T, SfuClientError>
     where
         F: FnOnce(SfuServiceClient<Channel>) -> Fut,
         Fut: std::future::Future<Output = Result<tonic::Response<T>, tonic::Status>>,
@@ -88,7 +84,9 @@ impl Registry {
             Ok(Err(status)) => {
                 if matches!(
                     status.code(),
-                    tonic::Code::Unavailable | tonic::Code::Cancelled | tonic::Code::DeadlineExceeded
+                    tonic::Code::Unavailable
+                        | tonic::Code::Cancelled
+                        | tonic::Code::DeadlineExceeded
                 ) {
                     self.invalidate_channel(sfu_addr).await;
                 }
@@ -121,7 +119,9 @@ impl Registry {
             signaling_id: self.signaling_id.clone(),
         };
         let response = self
-            .run_rpc(sfu_addr, |mut client| async move { client.create_peer(req).await })
+            .run_rpc(sfu_addr, |mut client| async move {
+                client.create_peer(req).await
+            })
             .await?;
         ensure_success(
             response.success,
@@ -143,7 +143,9 @@ impl Registry {
             reason: reason.to_owned(),
         };
         let response = self
-            .run_rpc(sfu_addr, |mut client| async move { client.delete_peer(req).await })
+            .run_rpc(sfu_addr, |mut client| async move {
+                client.delete_peer(req).await
+            })
             .await?;
         ensure_success(
             response.success,
@@ -167,7 +169,9 @@ impl Registry {
             r#type: parse_sdp_type(sdp_type) as i32,
         };
         let response = self
-            .run_rpc(sfu_addr, |mut client| async move { client.handle_sdp(req).await })
+            .run_rpc(sfu_addr, |mut client| async move {
+                client.handle_sdp(req).await
+            })
             .await?;
 
         ensure_success(
@@ -224,7 +228,10 @@ impl Registry {
 
         let endpoint = Endpoint::from_shared(sfu_addr.to_owned())?
             .connect_timeout(self.connect_timeout)
-            .tcp_nodelay(true);
+            .tcp_nodelay(true)
+            .http2_keep_alive_interval(Duration::from_secs(30))
+            .keep_alive_timeout(Duration::from_secs(10))
+            .keep_alive_while_idle(true);
         let channel = endpoint.connect().await?;
         self.clients
             .write()
@@ -324,14 +331,10 @@ fn map_connect_error(err: SfuClientError) -> tonic::Status {
 }
 
 async fn handle_sfu_event(state: &State, event: SfuEvent) {
-    let SfuEvent {
-        room_id,
-        participant_id,
-        event,
-    } = event;
-
-    match event {
-        Some(Event::PeerConnected(connected)) => {
+    let room_id = event.room_id;
+    let participant_id = event.participant_id;
+    match event.detail {
+        Some(SfuEventDetail::PeerConnected(connected)) => {
             info!(
                 participant_id = %participant_id,
                 room_id = %room_id,
@@ -339,7 +342,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
                 "SFU peer connected"
             );
         }
-        Some(Event::PeerDisconnected(disconnected)) => {
+        Some(SfuEventDetail::PeerDisconnected(disconnected)) => {
             warn!(
                 participant_id = %participant_id,
                 room_id = %room_id,
@@ -358,7 +361,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
                 .await;
             }
         }
-        Some(Event::TrackAdded(track)) => {
+        Some(SfuEventDetail::TrackAdded(track)) => {
             info!(
                 participant_id = %participant_id,
                 room_id = %room_id,
@@ -369,7 +372,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
                 "SFU track added"
             );
         }
-        Some(Event::TrackRemoved(track)) => {
+        Some(SfuEventDetail::TrackRemoved(track)) => {
             info!(
                 participant_id = %participant_id,
                 room_id = %room_id,
@@ -379,7 +382,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
                 "SFU track removed"
             );
         }
-        Some(Event::IceCandidate(candidate)) => {
+        Some(SfuEventDetail::IceCandidate(candidate)) => {
             debug!(
                 participant_id = %participant_id,
                 room_id = %room_id,
@@ -398,7 +401,7 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
             )
             .await;
         }
-        Some(Event::Error(err)) => {
+        Some(SfuEventDetail::Error(err)) => {
             error!(
                 participant_id = %participant_id,
                 room_id = %room_id,
@@ -418,30 +421,17 @@ async fn handle_sfu_event(state: &State, event: SfuEvent) {
             )
             .await;
         }
-        Some(Event::Heartbeat(heartbeat)) => {
-            debug!(
-                active_peers = heartbeat.active_peers,
-                active_rooms = heartbeat.active_rooms,
-                timestamp = heartbeat.timestamp,
-                "SFU heartbeat"
-            );
-        }
         None => {
             debug!(
                 participant_id = %participant_id,
                 room_id = %room_id,
-                "Received empty SFU event"
+                "Received SFU event with empty detail"
             );
         }
     }
 }
 
-async fn send_to_peer(
-    state: &State,
-    room_id: &str,
-    participant_id: &str,
-    payload: ServerMessage,
-) {
+async fn send_to_peer(state: &State, room_id: &str, participant_id: &str, payload: ServerMessage) {
     if participant_id.is_empty() {
         warn!("unable to route SFU event: empty participant_id");
         return;
@@ -515,4 +505,3 @@ fn format_sdp_type(value: i32) -> String {
         SdpType::Unspecified => "answer".to_owned(),
     }
 }
-

@@ -110,23 +110,23 @@ message PingResponse {
 // -----------------------------------------------------------------------------
 // События, которые SFU отправляет Signaling (через server streaming)
 // -----------------------------------------------------------------------------
+// Событие от SFU к Signaling: участник в комнате (room_id + participant_id) + полезная нагрузка.
 message SFUEvent {
     string room_id = 1;
-    string participant_id = 2; // Участник, к которому относится событие
-    
-    oneof event {
+    string participant_id = 2;
+
+    oneof detail {
         PeerConnectedEvent peer_connected = 3;
         PeerDisconnectedEvent peer_disconnected = 4;
         TrackAddedEvent track_added = 5;
         TrackRemovedEvent track_removed = 6;
         ICECandidateEvent ice_candidate = 7;
         ErrorEvent error = 8;
-        HeartbeatEvent heartbeat = 9;
     }
 }
 
 // Когда WebRTC соединение между SFU и клиентом полностью установлено (ICE done).
-// room_id и participant_id — в корне SFUEvent.
+// Идентификаторы — в корне SFUEvent (поля room_id, participant_id).
 message PeerConnectedEvent {
     string transport_type = 1; // "udp", "tcp", "relay"
 }
@@ -164,10 +164,3 @@ message ErrorEvent {
     bool is_fatal = 3;
 }
 
-// Периодическое сообщение "я жив" от SFU к Signaling.
-// Signaling будет использовать для мониторинга здоровья SFU.
-message HeartbeatEvent {
-    int64 timestamp = 1; // Unix timestamp (секунды)
-    uint32 active_peers = 2; // Количество активных пиров на этом SFU
-    uint32 active_rooms = 3; // Количество комнат
-}

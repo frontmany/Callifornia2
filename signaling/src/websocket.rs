@@ -5,8 +5,8 @@ use axum::response::IntoResponse;
 use futures_util::StreamExt;
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tonic::Code;
 use tokio::time::timeout;
+use tonic::Code;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -92,7 +92,8 @@ pub async fn ws_upgrade(
 async fn handle_ws(mut socket: WebSocket, state: State) {
     let mut heartbeat = tokio::time::interval(state.config.heartbeat_interval);
     let mut context = ConnectionContext::default();
-    let (outbound_tx, mut outbound_rx) = channel::<ServerMessage>(state.config.peer_outbound_capacity);
+    let (outbound_tx, mut outbound_rx) =
+        channel::<ServerMessage>(state.config.peer_outbound_capacity);
 
     loop {
         tokio::select! {
@@ -212,10 +213,9 @@ async fn handle_client_message(
                 let jti_ttl = std::time::Duration::from_secs(
                     claims.exp.saturating_sub(claims.iat).max(60) + 30,
                 );
-                let consumed =
-                    redis::consume_jti(&state.redis, &claims.jti, jti_ttl)
-                        .await
-                        .map_err(map_redis_error)?;
+                let consumed = redis::consume_jti(&state.redis, &claims.jti, jti_ttl)
+                    .await
+                    .map_err(map_redis_error)?;
                 if !consumed {
                     return Err(WsHandlerError::Unauthorized);
                 }
@@ -354,15 +354,8 @@ async fn handle_client_message(
             if !acquired {
                 return Err(WsHandlerError::SessionConflict);
             }
-            let result = handle_join_locked(
-                state,
-                socket,
-                context,
-                outbound_tx,
-                &session_id,
-                room_id,
-            )
-            .await;
+            let result =
+                handle_join_locked(state, socket, context, outbound_tx, &session_id, room_id).await;
             let _ = redis::release_session_lock(&state.redis, &session_id, &lock_owner).await;
             result
         }
@@ -506,8 +499,7 @@ async fn cleanup_connection(state: &State, context: &mut ConnectionContext) {
             warn!(error = %err, "failed to decrement signaling instance load");
         }
     }
-    if let Err(err) = redis::release_nick_lease(&state.redis, &session.nickname, session_id).await
-    {
+    if let Err(err) = redis::release_nick_lease(&state.redis, &session.nickname, session_id).await {
         warn!(error = %err, nickname = %session.nickname, "failed to release nick lease");
     }
     if let Err(err) = redis::session_delete(&state.redis, session_id).await {
@@ -646,9 +638,9 @@ fn map_redis_error(err: RedisRoomError) -> WsHandlerError {
 
 fn map_sfu_error(err: SfuClientError) -> WsHandlerError {
     match err {
-        SfuClientError::Transport(_)
-        | SfuClientError::Connect(_)
-        | SfuClientError::Timeout => WsHandlerError::SfuUnavailable,
+        SfuClientError::Transport(_) | SfuClientError::Connect(_) | SfuClientError::Timeout => {
+            WsHandlerError::SfuUnavailable
+        }
         SfuClientError::Rejected(_) => WsHandlerError::SfuRejected,
     }
 }
@@ -719,9 +711,7 @@ async fn leave_room(
     Ok(())
 }
 
-async fn recv_outbound(
-    outbound_rx: &mut Receiver<ServerMessage>,
-) -> Option<ServerMessage> {
+async fn recv_outbound(outbound_rx: &mut Receiver<ServerMessage>) -> Option<ServerMessage> {
     outbound_rx.recv().await
 }
 
@@ -796,9 +786,7 @@ async fn handle_join_locked(
         .ensure_peer(state, &sfu_addr, &room_id, &session.nickname)
         .await
     {
-        if let Err(srem_err) =
-            redis::srem_member(&state.redis, &room_id, &session.nickname).await
-        {
+        if let Err(srem_err) = redis::srem_member(&state.redis, &room_id, &session.nickname).await {
             warn!(error = %srem_err, room_id = %room_id, "compensating srem failed after sfu ensure_peer");
         }
         return Err(map_sfu_error(err));
@@ -902,9 +890,7 @@ async fn handle_create_locked(
         .ensure_peer(state, &sfu_addr, &room_id, &session.nickname)
         .await
     {
-        if let Err(srem_err) =
-            redis::srem_member(&state.redis, &room_id, &session.nickname).await
-        {
+        if let Err(srem_err) = redis::srem_member(&state.redis, &room_id, &session.nickname).await {
             warn!(error = %srem_err, room_id = %room_id, "compensating srem failed after sfu ensure_peer");
         }
         return Err(map_sfu_error(err));

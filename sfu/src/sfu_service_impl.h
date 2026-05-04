@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <grpcpp/grpcpp.h>
 #include <memory>
 
@@ -38,5 +37,4 @@ public:
 
 private:
     std::shared_ptr<SfuRuntime> m_runtime;
-    static constexpr std::chrono::seconds m_heartbeatInterval{15};
 };

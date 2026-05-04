@@ -281,7 +281,6 @@ impl State {
             }
         }
     }
-
 }
 
 impl From<RoomManagerError> for ServiceState {

@@ -24,8 +24,6 @@ public:
 
     bool removePeer(const std::string& roomId, const std::string& participantId);
 
-    sfu::SFUEvent buildHeartbeatEvent() const;
-
     std::size_t activePeerCount() const;
     std::size_t activeRoomCount() const;
 

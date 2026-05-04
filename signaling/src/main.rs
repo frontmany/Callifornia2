@@ -99,9 +99,7 @@ async fn main() -> Result<()> {
                 .run_purge(DegradationReason::RoomManagerDown)
                 .await;
             let node_id = shutdown_state.config.public_node_id();
-            if let Err(err) =
-                redis::remove_node_heartbeat(&shutdown_state.redis, &node_id).await
-            {
+            if let Err(err) = redis::remove_node_heartbeat(&shutdown_state.redis, &node_id).await {
                 warn!(error = %err, "failed to remove node heartbeat on shutdown");
             }
         })
@@ -144,14 +142,12 @@ struct HealthResponse {
     room_manager: &'static str,
 }
 
-async fn health(
-    AxumState(state): AxumState<State>,
-) -> (StatusCode, Json<HealthResponse>) {
+async fn health(AxumState(state): AxumState<State>) -> (StatusCode, Json<HealthResponse>) {
     let health = state.health().await;
     let redis = map_service_state_to_string(health.redis);
     let room_manager = map_service_state_to_string(health.room_manager);
-    let healthy = matches!(health.redis, ServiceState::Ok)
-        && matches!(health.room_manager, ServiceState::Ok);
+    let healthy =
+        matches!(health.redis, ServiceState::Ok) && matches!(health.room_manager, ServiceState::Ok);
     let status = if healthy { "ok" } else { "degraded" };
     let code = if healthy {
         StatusCode::OK
@@ -257,8 +253,7 @@ async fn monitor_room_manager(state: State) {
 
     loop {
         interval.tick().await;
-        let result =
-            tokio::time::timeout(probe_timeout, state.room_manager.get_status()).await;
+        let result = tokio::time::timeout(probe_timeout, state.room_manager.get_status()).await;
         let healthy = matches!(result, Ok(Ok(_)));
         if healthy {
             if was_down {

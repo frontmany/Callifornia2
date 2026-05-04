@@ -5,6 +5,7 @@
 
 #include "signaling.pb.h"
 
+#include <chrono>
 #include <thread>
 
 #include "absl/log/log.h"
@@ -123,14 +124,7 @@ grpc::Status SfuServiceImpl::SubscribeEvents(grpc::ServerContext* context,
     router->registerSignaling(signalingId, sub);
 
     while (!context->IsCancelled()) {
-        sfu::SFUEvent ev = m_runtime->buildHeartbeatEvent();
-        {
-            std::lock_guard lock(sub->m_writeMutex);
-            if (!writer->Write(ev)) {
-                break;
-            }
-        }
-        std::this_thread::sleep_for(m_heartbeatInterval);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     router->unregisterSignaling(signalingId, sub);

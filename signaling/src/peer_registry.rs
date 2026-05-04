@@ -115,9 +115,7 @@ impl PeerRegistry {
             .collect()
     }
 
-    pub async fn snapshot_rooms_with_sfu(
-        &self,
-    ) -> HashMap<String, Vec<(String, Option<String>)>> {
+    pub async fn snapshot_rooms_with_sfu(&self) -> HashMap<String, Vec<(String, Option<String>)>> {
         let peers = self.inner.read().await;
         peers
             .iter()

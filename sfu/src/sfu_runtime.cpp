@@ -1,6 +1,5 @@
 #include "sfu_runtime.h"
 
-#include <chrono>
 #include <utility>
 
 SfuRuntime::SfuRuntime(std::shared_ptr<EventRouter> eventRouter)
@@ -101,24 +100,6 @@ std::optional<std::string> SfuRuntime::findSignalingId(const std::string& roomId
         return std::nullopt;
     }
     return session->signalingId();
-}
-
-sfu::SFUEvent SfuRuntime::buildHeartbeatEvent() const {
-    sfu::SFUEvent event;
-    event.set_room_id("");
-    event.set_participant_id("");
-
-    auto* hb = event.mutable_heartbeat();
-
-    hb->set_timestamp(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
-
-    hb->set_active_peers(static_cast<uint32_t>(activePeerCount()));
-    hb->set_active_rooms(static_cast<uint32_t>(activeRoomCount()));
-
-    return event;
 }
 
 std::size_t SfuRuntime::activePeerCount() const {
