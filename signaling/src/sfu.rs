@@ -4,7 +4,7 @@ pub mod pb {
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pb::sfu_event::Detail as SfuEventDetail;
 use pb::sfu_service_client::SfuServiceClient;
@@ -13,7 +13,7 @@ use pb::{
     SfuEvent, SubscribeEventsRequest,
 };
 use rand::Rng;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tonic::transport::{Channel, Endpoint};
 use tracing::{debug, error, info, warn};
 
@@ -48,6 +48,10 @@ pub struct Registry {
     backoff_max: Duration,
     clients: Arc<RwLock<HashMap<String, Channel>>>,
     listeners: Arc<RwLock<HashSet<String>>>,
+    /// One in-flight HandleSDP (SFU applyRemoteOffer) per (room_id, participant).
+    sdp_peer_locks: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Last seen remote ICE ufrag from client offer (detect ICE restart).
+    last_offer_ice_ufrag: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl Registry {
@@ -66,7 +70,28 @@ impl Registry {
             backoff_max,
             clients: Arc::new(RwLock::new(HashMap::new())),
             listeners: Arc::new(RwLock::new(HashSet::new())),
+            sdp_peer_locks: Arc::new(RwLock::new(HashMap::new())),
+            last_offer_ice_ufrag: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    fn sdp_peer_key(room_id: &str, nickname: &str) -> String {
+        format!("{room_id}\x1f{nickname}")
+    }
+
+    async fn sdp_peer_mutex(&self, room_id: &str, nickname: &str) -> Arc<Mutex<()>> {
+        let key = Self::sdp_peer_key(room_id, nickname);
+        let mut locks = self.sdp_peer_locks.write().await;
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    async fn cleanup_peer_sdp_state(&self, room_id: &str, nickname: &str) {
+        let key = Self::sdp_peer_key(room_id, nickname);
+        self.sdp_peer_locks.write().await.remove(&key);
+        self.last_offer_ice_ufrag.write().await.remove(&key);
     }
 
     async fn invalidate_channel(&self, sfu_addr: &str) {
@@ -102,6 +127,8 @@ impl Registry {
     pub async fn clear(&self) {
         self.clients.write().await.clear();
         self.listeners.write().await.clear();
+        self.sdp_peer_locks.write().await.clear();
+        self.last_offer_ice_ufrag.write().await.clear();
     }
 
     pub async fn ensure_peer(
@@ -142,16 +169,23 @@ impl Registry {
             participant_id: nickname.to_owned(),
             reason: reason.to_owned(),
         };
-        let response = self
+        let result = self
             .run_rpc(sfu_addr, |mut client| async move {
                 client.delete_peer(req).await
             })
-            .await?;
-        ensure_success(
-            response.success,
-            response.error_message,
-            "SFU failed to delete peer",
-        )
+            .await
+            .and_then(|response| {
+                ensure_success(
+                    response.success,
+                    response.error_message,
+                    "SFU failed to delete peer",
+                )
+            });
+
+        // Local session teardown policy: if signaling disconnects this peer anyway,
+        // drop local per-peer renegotiation state regardless of SFU response.
+        self.cleanup_peer_sdp_state(room_id, nickname).await;
+        result
     }
 
     pub async fn handle_sdp(
@@ -162,6 +196,46 @@ impl Registry {
         sdp: String,
         sdp_type: &str,
     ) -> Result<RemoteSdp, SfuClientError> {
+        let peer_mtx = self.sdp_peer_mutex(room_id, nickname).await;
+        let queued_at = Instant::now();
+        let _peer_guard = peer_mtx.lock().await;
+        let queue_wait_ms = queued_at.elapsed().as_millis() as u64;
+        if queue_wait_ms > 0 {
+            debug!(
+                room_id = %room_id,
+                participant_id = %nickname,
+                queue_wait_ms = queue_wait_ms,
+                "HandleSDP waited for per-peer queue"
+            );
+        }
+
+        let peer_key = Self::sdp_peer_key(room_id, nickname);
+        let new_ufrag = if sdp_type == "offer" {
+            first_ice_ufrag(&sdp)
+        } else {
+            None
+        };
+        if let Some(ref u) = new_ufrag {
+            let prev = self
+                .last_offer_ice_ufrag
+                .read()
+                .await
+                .get(&peer_key)
+                .cloned();
+            if let Some(ref old) = prev {
+                if old != u {
+                    info!(
+                        room_id = %room_id,
+                        participant_id = %nickname,
+                        queue_wait_ms = queue_wait_ms,
+                        old_ufrag = %old,
+                        new_ufrag = %u,
+                        "SDP offer ICE ufrag changed (likely ICE restart or re-key)"
+                    );
+                }
+            }
+        }
+
         let req = HandleSdpRequest {
             room_id: room_id.to_owned(),
             participant_id: nickname.to_owned(),
@@ -179,6 +253,13 @@ impl Registry {
             response.error_message.clone(),
             "SFU rejected SDP",
         )?;
+
+        if let Some(u) = new_ufrag {
+            self.last_offer_ice_ufrag
+                .write()
+                .await
+                .insert(peer_key, u);
+        }
 
         Ok(RemoteSdp {
             sdp: response.sdp,
@@ -504,4 +585,18 @@ fn format_sdp_type(value: i32) -> String {
         SdpType::Answer => "answer".to_owned(),
         SdpType::Unspecified => "answer".to_owned(),
     }
+}
+
+/// First `a=ice-ufrag:` value in SDP (session or media level).
+fn first_ice_ufrag(sdp: &str) -> Option<String> {
+    for line in sdp.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(rest) = line.strip_prefix("a=ice-ufrag:") {
+            let ufrag = rest.split_whitespace().next().unwrap_or(rest).trim();
+            if !ufrag.is_empty() {
+                return Some(ufrag.to_owned());
+            }
+        }
+    }
+    None
 }
