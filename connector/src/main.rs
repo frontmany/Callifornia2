@@ -82,10 +82,12 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = Arc::new(Config::from_env().context("load config")?);
+
     let socket_addr: SocketAddr = config
         .connector_addr
         .parse()
         .with_context(|| format!("invalid CONNECTOR_ADDR: {}", config.connector_addr))?;
+
     let redis = redis::init_redis(&config.redis_url, config.redis_connect_timeout).await?;
     redis::set_op_timeout(config.redis_op_timeout);
     let state = State {
@@ -105,9 +107,11 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     info!(%socket_addr, "Connector server started");
+
     let listener = tokio::net::TcpListener::bind(socket_addr)
         .await
         .context("bind tcp listener")?;
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
