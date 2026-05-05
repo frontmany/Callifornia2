@@ -2,6 +2,12 @@
 **/target/
 **/*.rs.bk
 
+# --- WebAssembly / frontend build outputs ---
+**/dist/
+**/pkg/
+**/.trunk/
+**/.wasm-pack/
+
 # --- Локальные секреты и окружение ---
 .env
 .env.*
