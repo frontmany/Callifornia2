@@ -1,0 +1,107 @@
+:root {
+    --gradient-a: #f9f9ff;
+    --gradient-b: #ecedf7;
+    --gradient-c: #d7e4f0;
+
+    --text-primary: #181c22;
+    --text-muted: #414753;
+
+    --card-bg: rgba(255, 255, 255, 0.6);
+    --card-border: rgba(255, 255, 255, 0.5);
+
+    --avatar-bg: rgba(21, 119, 232, 0.12);
+
+    --input-bg: rgba(255, 255, 255, 0.4);
+    --input-border: rgba(255, 255, 255, 0.55);
+    --placeholder: rgba(65, 71, 83, 0.55);
+
+    --hint: rgba(65, 71, 83, 0.66);
+    --error-text: rgba(186, 26, 26, 0.82);
+
+    --focus-ring: rgba(21, 119, 232, 0.22);
+    --focus-glow: rgba(0, 92, 186, 0.12);
+
+    --error-ring: rgba(220, 80, 80, 0.22);
+    --error-glow: rgba(186, 26, 26, 0.08);
+    --error-ring-strong: rgba(220, 80, 80, 0.26);
+    --error-glow-strong: rgba(186, 26, 26, 0.12);
+
+    --color-primary: #1577e8;
+    --color-primary-hover: #0f62c2;
+    --color-on-surface: var(--text-primary);
+    --color-on-surface-variant: var(--text-muted);
+
+    --radius-card: 16px;
+    --radius-input: 12px;
+
+    --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.08);
+
+    --theme-toggle-pad: 3px;
+    --theme-toggle-track-w: 60px;
+    --theme-toggle-track-h: 31px;
+    --theme-toggle-thumb: calc(var(--theme-toggle-track-h) - 4px);
+    --theme-toggle-thumb-gap: 2px;
+    --theme-toggle-track-bg: rgba(237, 240, 250, 0.72);
+    --theme-toggle-track-border: rgba(113, 119, 133, 0.22);
+    --theme-toggle-focus-ring: rgba(255, 255, 255, 0.82);
+    --theme-toggle-thumb-bg: #ffffff;
+    --theme-toggle-thumb-bg-hover: #f7f8fc;
+    --theme-toggle-thumb-border: rgba(255, 255, 255, 0.5);
+    --theme-toggle-thumb-shadow:
+        0 2px 8px rgba(24, 28, 34, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --theme-toggle-sunspot: radial-gradient(
+        circle at 22% 50%,
+        rgba(255, 255, 255, 0.65) 0%,
+        rgba(255, 255, 255, 0) 62%
+    );
+}
+
+html.dark {
+    --gradient-a: #0f141c;
+    --gradient-b: #131b28;
+    --gradient-c: #172236;
+
+    --text-primary: #eff0fa;
+    --text-muted: rgba(239, 240, 250, 0.68);
+
+    --card-bg: rgba(24, 30, 41, 0.58);
+    --card-border: rgba(255, 255, 255, 0.12);
+
+    --avatar-bg: rgba(91, 160, 255, 0.18);
+
+    --input-bg: rgba(255, 255, 255, 0.06);
+    --input-border: rgba(255, 255, 255, 0.14);
+    --placeholder: rgba(239, 240, 250, 0.42);
+
+    --hint: rgba(239, 240, 250, 0.58);
+    --error-text: rgba(255, 168, 168, 0.9);
+
+    --focus-ring: rgba(91, 160, 255, 0.35);
+    --focus-glow: rgba(91, 160, 255, 0.16);
+
+    --error-ring: rgba(255, 120, 120, 0.28);
+    --error-glow: rgba(255, 80, 80, 0.12);
+    --error-ring-strong: rgba(255, 134, 134, 0.34);
+    --error-glow-strong: rgba(255, 80, 80, 0.16);
+
+    --color-primary: #5ba0ff;
+    --color-primary-hover: #7ab2ff;
+
+    --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.45);
+
+    --theme-toggle-track-bg: rgba(24, 29, 39, 0.62);
+    --theme-toggle-track-border: rgba(239, 240, 250, 0.14);
+    --theme-toggle-focus-ring: rgba(255, 255, 255, 0.38);
+    --theme-toggle-thumb-bg: #ffffff;
+    --theme-toggle-thumb-border: rgba(239, 240, 250, 0.58);
+    --theme-toggle-thumb-shadow:
+        0 4px 14px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    --theme-toggle-thumb-bg-hover: #f5f6fc;
+    --theme-toggle-sunspot: radial-gradient(
+        circle at 22% 50%,
+        rgba(255, 255, 255, 0.22) 0%,
+        rgba(255, 255, 255, 0) 60%
+    );
+}

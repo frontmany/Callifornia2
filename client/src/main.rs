@@ -1,13 +1,9 @@
-mod handlers;
-mod nickname_entry;
+mod app;
+mod components;
+mod nickname;
+mod theme;
 
-use nickname_entry::NicknameEntry;
-use yew::prelude::*;
-
-#[function_component]
-fn App() -> Html {
-    html! { <NicknameEntry /> }
-}
+use app::App;
 
 fn main() {
     yew::Renderer::<App>::new().render();

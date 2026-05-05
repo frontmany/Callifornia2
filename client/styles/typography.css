@@ -1,0 +1,33 @@
+.font-manrope {
+    font-family: "Outfit", "Manrope", "Segoe UI", sans-serif;
+}
+
+.h1 {
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.body-md {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.7;
+}
+
+.body-lg {
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.7;
+}
+
+.label-md {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.05em;
+}
+
+.text-on-background,
+.text-on-surface {
+    color: var(--color-on-surface);
+}

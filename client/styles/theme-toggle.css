@@ -1,0 +1,71 @@
+.theme-toggle {
+    position: fixed;
+    top: 18px;
+    right: 22px;
+    z-index: 50;
+    user-select: none;
+    width: calc(var(--theme-toggle-track-w) + (var(--theme-toggle-pad) * 2));
+    height: calc(var(--theme-toggle-track-h) + (var(--theme-toggle-pad) * 2));
+    padding: var(--theme-toggle-pad);
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.theme-toggle:hover .theme-toggle__thumb {
+    background-color: var(--theme-toggle-thumb-bg-hover);
+}
+
+.theme-toggle:active {
+    transform: translateY(1px);
+    transition-duration: 0.12s;
+}
+
+.theme-toggle:focus {
+    outline: none;
+}
+
+.theme-toggle:focus-visible {
+    outline: none;
+}
+
+.theme-toggle:focus-visible .theme-toggle__track {
+    box-shadow: 0 0 0 3px var(--theme-toggle-focus-ring);
+}
+
+.theme-toggle__track {
+    position: relative;
+    display: block;
+    width: var(--theme-toggle-track-w);
+    height: var(--theme-toggle-track-h);
+    border-radius: 999px;
+    border: 1px solid var(--theme-toggle-track-border);
+    background-image: var(--theme-toggle-sunspot), var(--theme-toggle-track-bg);
+    background-color: transparent;
+    background-repeat: no-repeat;
+    overflow: hidden;
+    transition: box-shadow 0.18s ease;
+}
+
+.theme-toggle__thumb {
+    position: absolute;
+    top: 50%;
+    left: var(--theme-toggle-thumb-gap);
+    width: var(--theme-toggle-thumb);
+    height: var(--theme-toggle-thumb);
+    border-radius: 999px;
+    border: 1px solid var(--theme-toggle-thumb-border);
+    background-color: var(--theme-toggle-thumb-bg);
+    box-shadow: var(--theme-toggle-thumb-shadow);
+    transform: translateY(-50%);
+    transition:
+        left 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.theme-toggle__track--dark .theme-toggle__thumb {
+    left: calc(100% - var(--theme-toggle-thumb) - var(--theme-toggle-thumb-gap));
+    transform: translateY(-50%);
+}

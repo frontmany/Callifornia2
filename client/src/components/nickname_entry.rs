@@ -1,6 +1,16 @@
-use crate::handlers;
+use crate::nickname::{submit_nickname, validate_nickname, validate_nickname_live};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use std::sync::LazyLock;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
+
+/// Logo embedded so it still loads regardless of asset URL / Trunk copies.
+static LOGO_PNG_DATA_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "data:image/png;base64,{}",
+        B64.encode(include_bytes!("../../icons/logo.png"))
+    )
+});
 
 #[function_component]
 pub fn NicknameEntry() -> Html {
@@ -14,12 +24,12 @@ pub fn NicknameEntry() -> Html {
         let attempted_submit = attempted_submit.clone();
         Callback::from(move |event: InputEvent| {
             let input: HtmlInputElement = event.target_unchecked_into();
-            let sanitized = handlers::handle_nickname_change(&input.value());
-            let validation = handlers::validate_nickname_live(&sanitized, *attempted_submit)
+            let value = input.value();
+            let validation = validate_nickname_live(&value, *attempted_submit)
                 .err()
                 .map(str::to_string);
 
-            nickname.set(sanitized);
+            nickname.set(value);
             validation_error.set(validation);
         })
     };
@@ -34,10 +44,10 @@ pub fn NicknameEntry() -> Html {
 
             attempted_submit.set(true);
 
-            match handlers::validate_nickname(&value) {
+            match validate_nickname(&value) {
                 Ok(()) => {
                     validation_error.set(None);
-                    handlers::handle_continue_click(&value);
+                    submit_nickname(&value);
                 }
                 Err(message) => validation_error.set(Some(message.to_owned())),
             }
@@ -59,21 +69,13 @@ pub fn NicknameEntry() -> Html {
         <main class="nickname-entry font-manrope text-on-background">
             <section class="nickname-entry__card" aria-label="Nickname entry card">
                 <div class="nickname-entry__avatar" aria-hidden="true">
-                    <svg
-                        class="nickname-entry__avatar-icon"
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        width="34"
-                        height="34"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.75"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4Z" />
-                        <path d="M4 21c1.5-4.5 6-6.5 8-6.5s6.5 2 8 6.5" />
-                    </svg>
+                    <img
+                        class="nickname-entry__avatar-logo"
+                        src={LOGO_PNG_DATA_URL.as_str()}
+                        width="52"
+                        height="52"
+                        alt=""
+                    />
                 </div>
 
                 <h1 class="nickname-entry__title h1">{ "What should we call you?" }</h1>
@@ -89,10 +91,10 @@ pub fn NicknameEntry() -> Html {
                         placeholder="e.g. Maverick"
                         autocomplete="nickname"
                     />
-                    <p class="nickname-entry__hint label-md">{ "english letters, numbers, underscores (3-24 chars)" }</p>
+                    <p class="nickname-entry__hint body-md">{ "English letters, numbers, underscores, no spaces (3–24 chars)" }</p>
 
                     if let Some(message) = &*validation_error {
-                        <p class="nickname-entry__error label-md" role="alert">{ message }</p>
+                        <p class="nickname-entry__error body-md" role="alert">{ message }</p>
                     }
 
                     <button class="nickname-entry__button" type="submit">
