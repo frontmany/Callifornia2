@@ -1,6 +1,6 @@
 //! Root shell: wires components and document-wide effects (e.g. theme class on `<html>`).
 
-use crate::components::{NicknameEntry, ThemeToggle};
+use crate::components::{MainMenu, NicknameEntry, ThemeToggle};
 use crate::theme::Theme;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
 use web_sys::HtmlElement;
@@ -9,6 +9,7 @@ use yew::prelude::*;
 #[function_component]
 pub fn App() -> Html {
     let theme = use_state(|| Theme::Light);
+    let screen = use_state(|| AppScreen::Nickname);
 
     {
         let theme = *theme;
@@ -27,10 +28,37 @@ pub fn App() -> Html {
         Callback::from(move |next: Theme| theme.set(next))
     };
 
+    let on_nickname_success = {
+        let screen = screen.clone();
+        Callback::from(move |_nickname: String| screen.set(AppScreen::MainMenu))
+    };
+
+    let on_back_to_nickname = {
+        let screen = screen.clone();
+        Callback::from(move |_| screen.set(AppScreen::Nickname))
+    };
+
     html! {
-        <>
-            <ThemeToggle theme={*theme} on_change={on_theme} />
-            <NicknameEntry />
-        </>
+        match *screen {
+            AppScreen::Nickname => html! {
+                <>
+                    <ThemeToggle theme={*theme} on_change={on_theme.clone()} />
+                    <NicknameEntry on_success={on_nickname_success} />
+                </>
+            },
+            AppScreen::MainMenu => html! {
+                <MainMenu
+                    theme={*theme}
+                    on_theme_change={on_theme}
+                    on_back={on_back_to_nickname}
+                />
+            },
+        }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AppScreen {
+    Nickname,
+    MainMenu,
 }

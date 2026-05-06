@@ -12,8 +12,13 @@ static LOGO_PNG_DATA_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+#[derive(Properties, PartialEq)]
+pub struct NicknameEntryProps {
+    pub on_success: Callback<String>,
+}
+
 #[function_component]
-pub fn NicknameEntry() -> Html {
+pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
     let nickname = use_state(String::new);
     let validation_error = use_state(|| Option::<String>::None);
     let attempted_submit = use_state(|| false);
@@ -38,6 +43,7 @@ pub fn NicknameEntry() -> Html {
         let nickname = nickname.clone();
         let validation_error = validation_error.clone();
         let attempted_submit = attempted_submit.clone();
+        let on_success = props.on_success.clone();
         Callback::from(move |event: SubmitEvent| {
             event.prevent_default();
             let value = (*nickname).clone();
@@ -48,6 +54,7 @@ pub fn NicknameEntry() -> Html {
                 Ok(()) => {
                     validation_error.set(None);
                     submit_nickname(&value);
+                    on_success.emit(value);
                 }
                 Err(message) => validation_error.set(Some(message.to_owned())),
             }

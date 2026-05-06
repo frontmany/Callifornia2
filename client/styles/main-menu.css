@@ -1,0 +1,200 @@
+.main-menu {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.main-menu__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.main-menu__actions--floating {
+    position: fixed;
+    top: 20px;
+    right: 28px;
+    z-index: 40;
+}
+
+.main-menu__actions .theme-toggle {
+    position: static;
+    top: auto;
+    right: auto;
+    z-index: auto;
+}
+
+.main-menu__icon-btn {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 0;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: color 0.2s ease, transform 0.1s ease;
+}
+
+.main-menu__icon-btn--settings:hover {
+    color: var(--color-primary);
+}
+
+.main-menu__icon-btn:active {
+    transform: scale(0.96);
+}
+
+.main-menu__icon-btn--settings svg {
+    width: 26px;
+    height: 26px;
+    display: block;
+}
+
+.main-menu__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 50px;
+    padding: 72px 32px 92px;
+}
+
+.main-menu__heading {
+    text-align: center;
+    max-width: 760px;
+    margin: 0;
+}
+
+.main-menu__title {
+    margin: 0 0 14px;
+    color: var(--text-primary);
+}
+
+.main-menu__subtitle {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.main-menu__cards {
+    width: min(100%, 920px);
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 30px;
+}
+
+.main-menu__card {
+    border: 1px solid color-mix(in srgb, var(--card-border) 84%, transparent);
+    border-radius: 24px;
+    background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shadow-card);
+    min-height: 324px;
+    padding: 54px 38px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 18px;
+    cursor: pointer;
+    transition: box-shadow 0.25s ease;
+}
+
+.main-menu__card:hover {
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.12);
+}
+
+.main-menu__card-icon {
+    width: 96px;
+    height: 96px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+}
+
+.main-menu__card-icon--primary {
+    background: var(--color-primary);
+    color: #ffffff;
+}
+
+.main-menu__card-icon--secondary {
+    background: color-mix(in srgb, var(--text-muted) 18%, white);
+    color: var(--text-muted);
+}
+
+.main-menu__card-svg {
+    width: 48px;
+    height: 48px;
+    display: block;
+}
+
+.main-menu__card-title {
+    margin: 4px 0 0;
+    color: var(--text-primary);
+}
+
+.main-menu__card-text {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+html.dark .main-menu__card-icon--secondary {
+    background: rgba(239, 240, 250, 0.14);
+    color: #eff0fa;
+}
+
+html.dark .main-menu__card-svg {
+    opacity: 0.94;
+}
+
+.main-menu__back {
+    border: 1px solid color-mix(in srgb, var(--card-border) 95%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    color: var(--text-muted);
+    min-height: 44px;
+    padding: 0 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 22px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.main-menu__back:hover {
+    background: color-mix(in srgb, var(--card-bg) 98%, white 2%);
+}
+
+.main-menu__back:active {
+    transform: scale(0.98);
+}
+
+.main-menu__back-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+}
+
+@media (max-width: 860px) {
+    .main-menu__cards {
+        grid-template-columns: 1fr;
+        max-width: 580px;
+    }
+
+    .main-menu__content {
+        gap: 42px;
+        padding: 60px 24px 78px;
+    }
+}
