@@ -1,5 +1,5 @@
 use crate::nickname::{submit_nickname, validate_nickname, validate_nickname_live};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use std::sync::LazyLock;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;

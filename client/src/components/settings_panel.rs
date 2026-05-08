@@ -5,7 +5,7 @@ mod data;
 
 use crate::components::ThemeToggle;
 use crate::theme::Theme;
-use data::{stub_device_catalog, DeviceEntry, DeviceKind};
+use data::{DeviceEntry, DeviceKind, stub_device_catalog};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
@@ -26,6 +26,12 @@ pub struct SettingsPanelProps {
     pub on_toggle_camera: Callback<()>,
     pub on_input_level_change: Callback<u32>,
     pub on_output_level_change: Callback<u32>,
+    pub selected_mic_device_id: &'static str,
+    pub selected_speaker_device_id: &'static str,
+    pub selected_camera_device_id: &'static str,
+    pub on_mic_device_change: Callback<&'static str>,
+    pub on_speaker_device_change: Callback<&'static str>,
+    pub on_camera_device_change: Callback<&'static str>,
 }
 
 #[function_component]
@@ -33,17 +39,25 @@ pub fn SettingsPanel(props: &SettingsPanelProps) -> Html {
     let tab = use_state(|| DeviceKind::Input);
     let catalog = stub_device_catalog();
 
-    let input_selected = use_state(|| catalog.inputs[0].id);
-    let output_selected = use_state(|| catalog.outputs[0].id);
-    let camera_selected = use_state(|| catalog.cameras[0].id);
-
     let on_input_level = on_level_input(props.on_input_level_change.clone());
     let on_output_level = on_level_input(props.on_output_level_change.clone());
 
     let current_list = match *tab {
-        DeviceKind::Input => render_device_list(catalog.inputs, input_selected.clone()),
-        DeviceKind::Output => render_device_list(catalog.outputs, output_selected.clone()),
-        DeviceKind::Camera => render_device_list(catalog.cameras, camera_selected.clone()),
+        DeviceKind::Input => render_device_list(
+            catalog.inputs,
+            props.selected_mic_device_id,
+            props.on_mic_device_change.clone(),
+        ),
+        DeviceKind::Output => render_device_list(
+            catalog.outputs,
+            props.selected_speaker_device_id,
+            props.on_speaker_device_change.clone(),
+        ),
+        DeviceKind::Camera => render_device_list(
+            catalog.cameras,
+            props.selected_camera_device_id,
+            props.on_camera_device_change.clone(),
+        ),
     };
 
     html! {
@@ -178,17 +192,21 @@ fn tab_button(tab_kind: DeviceKind, selected: UseStateHandle<DeviceKind>) -> Htm
     }
 }
 
-fn render_device_list(devices: &[DeviceEntry], selected: UseStateHandle<&'static str>) -> Html {
+fn render_device_list(
+    devices: &[DeviceEntry],
+    selected_device_id: &'static str,
+    on_select_device: Callback<&'static str>,
+) -> Html {
     html! {
         <div class="settings-panel__list">
             {
                 for devices.iter().map(|entry| {
-                    let is_selected = *selected == entry.id;
+                    let is_selected = selected_device_id == entry.id;
                     let selected_class = is_selected.then_some("settings-panel__item--selected");
                     let onclick = {
-                        let selected = selected.clone();
+                        let on_select_device = on_select_device.clone();
                         let id = entry.id;
-                        Callback::from(move |_| selected.set(id))
+                        Callback::from(move |_| on_select_device.emit(id))
                     };
                     html! {
                         <button

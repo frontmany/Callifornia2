@@ -13,9 +13,7 @@ pub async fn submit_nickname(nickname: &str) -> Result<AuthResponse, String> {
 }
 
 fn ascii_nickname_chars_only(value: &str) -> bool {
-    value
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn validate_no_whitespace(value: &str) -> Result<(), &'static str> {
