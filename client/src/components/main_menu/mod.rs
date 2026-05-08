@@ -17,7 +17,7 @@ pub struct MainMenuProps {
 pub fn MainMenu(props: &MainMenuProps) -> Html {
     let is_settings_open = use_state(|| false);
     let mic_enabled = use_state(|| true);
-    let camera_enabled = use_state(|| true);
+    let camera_enabled = use_state(|| false);
     let input_level = use_state(|| 100u32);
     let output_level = use_state(|| 100u32);
 

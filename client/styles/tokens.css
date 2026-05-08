@@ -15,8 +15,9 @@
     --input-border: rgba(255, 255, 255, 0.55);
     --placeholder: rgba(65, 71, 83, 0.55);
 
-    --hint: rgba(65, 71, 83, 0.66);
+    --hint: rgba(65, 71, 83, 0.58);
     --error-text: rgba(186, 26, 26, 0.82);
+    --error-text-soft: rgba(186, 26, 26, 0.72);
 
     --focus-ring: rgba(21, 119, 232, 0.22);
     --focus-glow: rgba(0, 92, 186, 0.12);
@@ -74,8 +75,9 @@ html.dark {
     --input-border: rgba(255, 255, 255, 0.14);
     --placeholder: rgba(239, 240, 250, 0.42);
 
-    --hint: rgba(239, 240, 250, 0.58);
+    --hint: rgba(239, 240, 250, 0.52);
     --error-text: rgba(255, 168, 168, 0.9);
+    --error-text-soft: rgba(255, 168, 168, 0.8);
 
     --focus-ring: rgba(91, 160, 255, 0.35);
     --focus-glow: rgba(91, 160, 255, 0.16);

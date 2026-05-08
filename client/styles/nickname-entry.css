@@ -56,7 +56,7 @@
 .nickname-entry__input {
     width: 100%;
     min-height: 52px;
-    padding: 14px 18px;
+    padding: 14px 20px;
     border: 1px solid var(--input-border);
     border-radius: var(--radius-input);
     background: var(--input-bg);
@@ -104,14 +104,18 @@
 
 .nickname-entry__hint {
     margin: 0;
-    padding-left: 18px;
-    color: var(--text-muted);
+    padding-left: 20px;
+    color: var(--hint);
+    font-size: 14px;
+    line-height: 1.45;
 }
 
 .nickname-entry__error {
     margin: 0;
-    padding-left: 18px;
-    color: var(--error-text);
+    padding-left: 20px;
+    color: var(--error-text-soft);
+    font-size: 14px;
+    line-height: 1.45;
 }
 
 .nickname-entry__button {
