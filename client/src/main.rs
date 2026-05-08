@@ -1,5 +1,6 @@
 mod app;
 mod components;
+mod connector_api;
 mod nickname;
 mod theme;
 

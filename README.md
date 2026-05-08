@@ -8,7 +8,7 @@ Real-time calling stack: **Rust** services for routing, sessions, and HTTP/WebSo
 
 | Component | Role |
 |-----------|------|
-| **connector** | Public edge: WebSocket API for clients, JWT/session handoff, Redis-backed coordination. Routes users to a **signaling** instance. |
+| **connector** | Public edge: REST API for clients, JWT/session handoff, Redis-backed coordination. Routes users to a **signaling** instance. |
 | **signaling** | Core call signaling: WebRTC SDP/ICE exchange with clients, talks to **room_manager** (gRPC) for rooms and SFU allocation, and to **SFU** (gRPC, `proto/signaling.proto`) for peer lifecycle and media plane control. |
 | **room_manager** | gRPC control plane: room state, SFU pool / provisioning hints (`ROOM_MANAGER_SFU_CANDIDATES`), health checks against SFU instances. Uses **Redis** as shared storage. |
 | **sfu** (`sfu/`) | C++ executable: **libdatachannel** WebRTC stack, exposes **SFUService** over gRPC (same protos as Rust). |
@@ -124,7 +124,7 @@ Align **`CONNECTOR_TOKEN_SECRET`** between connector and signaling so issued tok
 ## Repository layout (high level)
 
 ```
-connector/       # Axum WebSocket edge → signaling handoff
+connector/       # Axum REST edge → signaling handoff
 signaling/       # WebSocket signaling + gRPC to room_manager & SFU
 room_manager/    # tonic gRPC server + Redis
 sfu/             # C++ SFU (CMake: gRPC + libdatachannel submodules)

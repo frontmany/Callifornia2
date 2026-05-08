@@ -1,6 +1,7 @@
 use crate::nickname::{submit_nickname, validate_nickname, validate_nickname_live};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use std::sync::LazyLock;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
@@ -22,6 +23,7 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
     let nickname = use_state(String::new);
     let validation_error = use_state(|| Option::<String>::None);
     let attempted_submit = use_state(|| false);
+    let is_submitting = use_state(|| false);
 
     let on_input = {
         let nickname = nickname.clone();
@@ -43,18 +45,31 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
         let nickname = nickname.clone();
         let validation_error = validation_error.clone();
         let attempted_submit = attempted_submit.clone();
+        let is_submitting = is_submitting.clone();
         let on_success = props.on_success.clone();
         Callback::from(move |event: SubmitEvent| {
             event.prevent_default();
             let value = (*nickname).clone();
+            if *is_submitting {
+                return;
+            }
 
             attempted_submit.set(true);
 
             match validate_nickname(&value) {
                 Ok(()) => {
+                    let is_submitting = is_submitting.clone();
+                    let validation_error = validation_error.clone();
+                    let on_success = on_success.clone();
                     validation_error.set(None);
-                    submit_nickname(&value);
-                    on_success.emit(value);
+                    is_submitting.set(true);
+                    spawn_local(async move {
+                        match submit_nickname(&value).await {
+                            Ok(response) => on_success.emit(response.session_id),
+                            Err(message) => validation_error.set(Some(message)),
+                        }
+                        is_submitting.set(false);
+                    });
                 }
                 Err(message) => validation_error.set(Some(message.to_owned())),
             }
@@ -104,8 +119,10 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
                         <p class="nickname-entry__error body-md" role="alert">{ message }</p>
                     }
 
-                    <button class="nickname-entry__button" type="submit">
-                        <span class="nickname-entry__button-label">{ "Continue" }</span>
+                    <button class="nickname-entry__button" type="submit" disabled={*is_submitting}>
+                        <span class="nickname-entry__button-label">
+                            { if *is_submitting { "Connecting..." } else { "Continue" } }
+                        </span>
                         <span class="nickname-entry__button-arrow" aria-hidden="true">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M5 12h14" />

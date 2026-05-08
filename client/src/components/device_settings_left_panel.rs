@@ -1,8 +1,9 @@
 //! Left-side pre-join panel for media device choices.
 
+#[path = "device_settings_left_panel/data.rs"]
 mod data;
 
-use data::{DeviceEntry, DeviceKind, stub_device_catalog};
+use data::{stub_device_catalog, DeviceEntry, DeviceKind};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
@@ -223,4 +224,3 @@ fn level_slider(value: u32, oninput: Callback<InputEvent>) -> Html {
         />
     }
 }
-

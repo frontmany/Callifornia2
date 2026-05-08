@@ -22,9 +22,22 @@ else
 end
 "#;
 
+const COMPARE_AND_EXPIRE_LUA: &str = r#"
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('EXPIRE', KEYS[1], ARGV[2])
+else
+    return 0
+end
+"#;
+
 #[derive(Debug, Clone)]
 pub struct RoomRoute {
     pub signaling_instance_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionData {
+    pub nickname: String,
 }
 
 #[derive(Debug, Error)]
@@ -146,6 +159,37 @@ pub async fn session_delete(client: &Client, session_id: &str) -> Result<(), Red
         let mut conn = client.get_connection_manager().await?;
         let _: usize = conn.del(session_key(session_id)).await?;
         Ok(())
+    })
+    .await
+}
+
+pub async fn session_get(client: &Client, session_id: &str) -> Result<Option<SessionData>, RedisError> {
+    with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let key = session_key(session_id);
+        let nickname: Option<String> = conn.hget(&key, "nickname").await?;
+        Ok(nickname
+            .filter(|value| !value.is_empty())
+            .map(|nickname| SessionData { nickname }))
+    })
+    .await
+}
+
+pub async fn extend_nick_lease(
+    client: &Client,
+    nickname: &str,
+    session_id: &str,
+    ttl: Duration,
+) -> Result<bool, RedisError> {
+    with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let updated: i64 = redis::Script::new(COMPARE_AND_EXPIRE_LUA)
+            .key(nick_key(nickname))
+            .arg(session_id)
+            .arg(ttl.as_secs().max(1))
+            .invoke_async(&mut conn)
+            .await?;
+        Ok(updated != 0)
     })
     .await
 }

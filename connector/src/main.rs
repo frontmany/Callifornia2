@@ -7,19 +7,17 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State as AxumState;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::Json;
-use axum::Router;
-use futures_util::StreamExt;
-use message::{ClientMessage, ServerErrorCode, ServerMessage};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use message::{
+    AuthRequest, AuthResponse, CreateRequest, ErrorResponse, JoinRequest, LogoutRequest,
+    ServerErrorCode, SignalingReadyResponse,
+};
 use serde::Serialize;
-use thiserror::Error;
 use tokio::sync::RwLock;
-use tokio::time::timeout;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -49,31 +47,16 @@ impl State {
     }
 }
 
-#[derive(Default)]
-struct ConnectionContext {
-    session_id: Option<String>,
-    nickname: Option<String>,
-    handoff_issued: bool,
-}
-
-#[derive(Debug, Error)]
+#[derive(Debug)]
 enum HandlerError {
-    #[error("connection is not authorized")]
     Unauthorized,
-    #[error("nickname already taken")]
     NicknameTaken,
-    #[error("room not found")]
     RoomNotFound,
-    #[error("redis operation failed")]
     Redis,
-    #[error("no healthy signaling instance")]
     SignalingUnavailable,
-    #[error("signaling instance not in connector config")]
     UnknownSignalingRoute,
-    #[error("failed to issue connector token")]
+    InvalidPayload(&'static str),
     Token,
-    #[error("failed to send websocket message")]
-    WriteFailed,
 }
 
 #[tokio::main]
@@ -102,7 +85,10 @@ async fn main() -> Result<()> {
     });
 
     let app = Router::new()
-        .route("/ws", get(ws_upgrade))
+        .route("/auth", post(auth))
+        .route("/create", post(create))
+        .route("/join", post(join))
+        .route("/logout", post(logout))
         .route("/health", get(health))
         .with_state(state);
 
@@ -128,197 +114,139 @@ fn init_tracing() {
         .init();
 }
 
-async fn ws_upgrade(ws: WebSocketUpgrade, AxumState(state): AxumState<State>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws(socket, state))
+async fn auth(
+    AxumState(state): AxumState<State>,
+    Json(payload): Json<AuthRequest>,
+) -> Result<Json<AuthResponse>, ApiError> {
+    payload
+        .validate()
+        .map_err(|_| HandlerError::InvalidPayload("Invalid auth request"))?;
+    let nickname = payload.nickname.trim().to_owned();
+    let session_id = Uuid::new_v4().to_string();
+
+    redis::acquire_nick_lease(
+        &state.redis,
+        &nickname,
+        &session_id,
+        state.config.nick_lease_ttl,
+    )
+    .await
+    .map_err(map_redis_error)?;
+
+    if let Err(err) =
+        redis::session_create(&state.redis, &session_id, &nickname, state.config.session_ttl).await
+    {
+        let _ = redis::release_nick_lease(&state.redis, &nickname, &session_id).await;
+        return Err(map_redis_error(err).into());
+    }
+
+    Ok(Json(AuthResponse {
+        nickname,
+        session_id,
+    }))
 }
 
-async fn handle_ws(mut socket: WebSocket, state: State) {
-    let mut context = ConnectionContext::default();
-    while let Some(incoming) = socket.next().await {
-        let message = match incoming {
-            Ok(Message::Text(text)) => text,
-            Ok(Message::Close(_)) | Err(_) => break,
-            _ => continue,
-        };
-
-        let result = match serde_json::from_str::<ClientMessage>(&message) {
-            Ok(message) => {
-                if let Err(err) = message.validate() {
-                    send_error(
-                        &mut socket,
-                        ServerErrorCode::InvalidPayload,
-                        &err.to_string(),
-                        state.config.ws_write_timeout,
-                    )
-                    .await
-                } else {
-                    handle_message(&mut socket, &state, &mut context, message).await
-                }
-            }
-            Err(_) => {
-                send_error(
-                    &mut socket,
-                    ServerErrorCode::InvalidJson,
-                    "Malformed JSON",
-                    state.config.ws_write_timeout,
-                )
-                .await
-            }
-        };
-
-        if let Err(err) = result {
-            if matches!(err, HandlerError::WriteFailed) {
-                break;
-            }
-            let (code, message) = map_error(&err);
-            if send_error(&mut socket, code, message, state.config.ws_write_timeout)
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
+async fn create(
+    AxumState(state): AxumState<State>,
+    Json(payload): Json<CreateRequest>,
+) -> Result<Json<SignalingReadyResponse>, ApiError> {
+    payload
+        .validate()
+        .map_err(|_| HandlerError::InvalidPayload("Invalid create request"))?;
+    let session = redis::session_get(&state.redis, &payload.session_id)
+        .await
+        .map_err(map_redis_error)?
+        .ok_or(HandlerError::Unauthorized)?;
+    let lease_ok = redis::extend_nick_lease(
+        &state.redis,
+        &session.nickname,
+        &payload.session_id,
+        state.config.nick_lease_ttl,
+    )
+    .await
+    .map_err(map_redis_error)?;
+    if !lease_ok {
+        return Err(HandlerError::Unauthorized.into());
     }
 
-    cleanup_connection(&state, &context).await;
+    let signaling = select_least_loaded_signaling(&state).await?;
+    let token = issue_signaling_token(
+        &state,
+        &payload.session_id,
+        &session.nickname,
+        &signaling.id,
+        "create",
+        None,
+    )?;
+
+    Ok(Json(SignalingReadyResponse {
+        signaling_url: signaling.ws_url.clone(),
+        session_id: payload.session_id,
+        token,
+    }))
 }
 
-async fn handle_message(
-    socket: &mut WebSocket,
-    state: &State,
-    context: &mut ConnectionContext,
-    message: ClientMessage,
-) -> Result<(), HandlerError> {
-    match message {
-        ClientMessage::Auth { nickname } => {
-            let session_id = Uuid::new_v4().to_string();
-            redis::acquire_nick_lease(
-                &state.redis,
-                &nickname,
-                &session_id,
-                state.config.nick_lease_ttl,
-            )
-            .await
-            .map_err(map_redis_error)?;
-
-            if let Err(err) = redis::session_create(
-                &state.redis,
-                &session_id,
-                &nickname,
-                state.config.session_ttl,
-            )
-            .await
-            {
-                let _ = redis::release_nick_lease(&state.redis, &nickname, &session_id).await;
-                return Err(map_redis_error(err));
-            }
-
-            context.session_id = Some(session_id.clone());
-            context.nickname = Some(nickname.clone());
-
-            send_message(
-                socket,
-                ServerMessage::AuthOk {
-                    nickname,
-                    session_id,
-                },
-                state.config.ws_write_timeout,
-            )
-            .await
-        }
-        ClientMessage::Create => {
-            let (session_id, nickname) = authenticated_context(context)?;
-            let signaling = select_least_loaded_signaling(state).await?;
-            let token = issue_signaling_token(
-                state,
-                &session_id,
-                &nickname,
-                &signaling.id,
-                "create",
-                None,
-            )?;
-            context.handoff_issued = true;
-            send_message(
-                socket,
-                ServerMessage::SignalingReady {
-                    signaling_url: signaling.ws_url.clone(),
-                    session_id,
-                    token,
-                },
-                state.config.ws_write_timeout,
-            )
-            .await
-        }
-        ClientMessage::Join { room_id } => {
-            let (session_id, nickname) = authenticated_context(context)?;
-            let route = redis::get_room_route(&state.redis, &room_id)
-                .await
-                .map_err(map_redis_error)?;
-            let signaling = state
-                .config
-                .signaling_by_id(&route.signaling_instance_id)
-                .ok_or(HandlerError::UnknownSignalingRoute)?;
-            let token = issue_signaling_token(
-                state,
-                &session_id,
-                &nickname,
-                &signaling.id,
-                "join",
-                Some(room_id),
-            )?;
-            context.handoff_issued = true;
-            send_message(
-                socket,
-                ServerMessage::SignalingReady {
-                    signaling_url: signaling.ws_url.clone(),
-                    session_id,
-                    token,
-                },
-                state.config.ws_write_timeout,
-            )
-            .await
-        }
-        ClientMessage::Logout => {
-            if let (Some(session_id), Some(nickname)) =
-                (context.session_id.take(), context.nickname.take())
-            {
-                let _ = redis::session_delete(&state.redis, &session_id).await;
-                let _ = redis::release_nick_lease(&state.redis, &nickname, &session_id).await;
-            }
-            send_message(
-                socket,
-                ServerMessage::LoggedOut,
-                state.config.ws_write_timeout,
-            )
-            .await
-        }
+async fn join(
+    AxumState(state): AxumState<State>,
+    Json(payload): Json<JoinRequest>,
+) -> Result<Json<SignalingReadyResponse>, ApiError> {
+    payload
+        .validate()
+        .map_err(|_| HandlerError::InvalidPayload("Invalid join request"))?;
+    let session = redis::session_get(&state.redis, &payload.session_id)
+        .await
+        .map_err(map_redis_error)?
+        .ok_or(HandlerError::Unauthorized)?;
+    let lease_ok = redis::extend_nick_lease(
+        &state.redis,
+        &session.nickname,
+        &payload.session_id,
+        state.config.nick_lease_ttl,
+    )
+    .await
+    .map_err(map_redis_error)?;
+    if !lease_ok {
+        return Err(HandlerError::Unauthorized.into());
     }
+
+    let route = redis::get_room_route(&state.redis, &payload.room_id)
+        .await
+        .map_err(map_redis_error)?;
+    let signaling = state
+        .config
+        .signaling_by_id(&route.signaling_instance_id)
+        .ok_or(HandlerError::UnknownSignalingRoute)?;
+    let token = issue_signaling_token(
+        &state,
+        &payload.session_id,
+        &session.nickname,
+        &signaling.id,
+        "join",
+        Some(payload.room_id),
+    )?;
+
+    Ok(Json(SignalingReadyResponse {
+        signaling_url: signaling.ws_url.clone(),
+        session_id: payload.session_id,
+        token,
+    }))
 }
 
-async fn cleanup_connection(state: &State, context: &ConnectionContext) {
-    if context.handoff_issued {
-        return;
+async fn logout(
+    AxumState(state): AxumState<State>,
+    Json(payload): Json<LogoutRequest>,
+) -> Result<StatusCode, ApiError> {
+    payload
+        .validate()
+        .map_err(|_| HandlerError::InvalidPayload("Invalid logout request"))?;
+    let session = redis::session_get(&state.redis, &payload.session_id)
+        .await
+        .map_err(map_redis_error)?;
+    if let Some(session) = session {
+        let _ = redis::session_delete(&state.redis, &payload.session_id).await;
+        let _ = redis::release_nick_lease(&state.redis, &session.nickname, &payload.session_id).await;
     }
-    let (Some(session_id), Some(nickname)) = (&context.session_id, &context.nickname) else {
-        return;
-    };
-
-    if let Err(err) = redis::session_delete(&state.redis, session_id).await {
-        warn!(error = %err, session_id = %session_id, "failed to cleanup connector session");
-    }
-    if let Err(err) = redis::release_nick_lease(&state.redis, nickname, session_id).await {
-        warn!(error = %err, nickname = %nickname, "failed to release connector nick lease");
-    }
-}
-
-fn authenticated_context(context: &ConnectionContext) -> Result<(String, String), HandlerError> {
-    Ok((
-        context
-            .session_id
-            .clone()
-            .ok_or(HandlerError::Unauthorized)?,
-        context.nickname.clone().ok_or(HandlerError::Unauthorized)?,
-    ))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn select_least_loaded_signaling(
@@ -368,35 +296,6 @@ fn issue_signaling_token(
     .map_err(|_| HandlerError::Token)
 }
 
-async fn send_message(
-    socket: &mut WebSocket,
-    payload: ServerMessage,
-    write_timeout: std::time::Duration,
-) -> Result<(), HandlerError> {
-    let text = serde_json::to_string(&payload).map_err(|_| HandlerError::WriteFailed)?;
-    timeout(write_timeout, socket.send(Message::Text(text.into())))
-        .await
-        .map_err(|_| HandlerError::WriteFailed)?
-        .map_err(|_| HandlerError::WriteFailed)
-}
-
-async fn send_error(
-    socket: &mut WebSocket,
-    code: ServerErrorCode,
-    message: &str,
-    write_timeout: std::time::Duration,
-) -> Result<(), HandlerError> {
-    send_message(
-        socket,
-        ServerMessage::Error {
-            code,
-            message: message.to_owned(),
-        },
-        write_timeout,
-    )
-    .await
-}
-
 fn map_redis_error(err: redis::RedisError) -> HandlerError {
     match err {
         redis::RedisError::NicknameTaken => HandlerError::NicknameTaken,
@@ -409,7 +308,7 @@ fn map_redis_error(err: redis::RedisError) -> HandlerError {
 
 fn map_error(err: &HandlerError) -> (ServerErrorCode, &'static str) {
     match err {
-        HandlerError::Unauthorized => (ServerErrorCode::Unauthorized, "Unauthorized"),
+        HandlerError::Unauthorized => (ServerErrorCode::Unauthorized, "Unauthorized session"),
         HandlerError::NicknameTaken => (ServerErrorCode::NicknameTaken, "Nickname already taken"),
         HandlerError::RoomNotFound => (ServerErrorCode::RoomNotFound, "Room not found"),
         HandlerError::Redis => (ServerErrorCode::StorageUnavailable, "Storage operation failed"),
@@ -422,7 +321,43 @@ fn map_error(err: &HandlerError) -> (ServerErrorCode, &'static str) {
             "Signaling route is not configured on this connector",
         ),
         HandlerError::Token => (ServerErrorCode::TokenIssueFailed, "Failed to issue token"),
-        HandlerError::WriteFailed => (ServerErrorCode::WriteFailed, "Failed to send message"),
+        HandlerError::InvalidPayload(message) => (ServerErrorCode::InvalidPayload, message),
+    }
+}
+
+fn status_for_error(err: &HandlerError) -> StatusCode {
+    match err {
+        HandlerError::Unauthorized => StatusCode::UNAUTHORIZED,
+        HandlerError::NicknameTaken => StatusCode::CONFLICT,
+        HandlerError::RoomNotFound => StatusCode::NOT_FOUND,
+        HandlerError::Redis => StatusCode::SERVICE_UNAVAILABLE,
+        HandlerError::SignalingUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        HandlerError::UnknownSignalingRoute => StatusCode::SERVICE_UNAVAILABLE,
+        HandlerError::InvalidPayload(_) => StatusCode::BAD_REQUEST,
+        HandlerError::Token => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+struct ApiError(HandlerError);
+
+impl From<HandlerError> for ApiError {
+    fn from(value: HandlerError) -> Self {
+        Self(value)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        let status = status_for_error(&self.0);
+        let (code, message) = map_error(&self.0);
+        (
+            status,
+            Json(ErrorResponse {
+                code,
+                message: message.to_owned(),
+            }),
+        )
+            .into_response()
     }
 }
 

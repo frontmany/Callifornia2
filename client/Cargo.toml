@@ -5,6 +5,10 @@ edition = "2024"
 
 [dependencies]
 base64 = "0.22"
+gloo-net = { version = "0.6", features = ["http"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3.97", features = ["Document", "Element", "HtmlElement", "HtmlInputElement", "Window"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.97", features = ["Document", "Element", "Event", "EventTarget", "HtmlElement", "HtmlInputElement", "Window"] }
 yew = { version = "0.23.0", features = ["csr"] }

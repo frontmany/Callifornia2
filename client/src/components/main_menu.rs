@@ -1,9 +1,12 @@
 //! Main screen after nickname: room choice and global chrome.
 
+#[path = "main_menu/icons.rs"]
 mod icons;
 
 use crate::components::{DeviceSettingsLeftPanel, ThemeToggle};
+use crate::connector_api;
 use crate::theme::Theme;
+use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -11,6 +14,8 @@ pub struct MainMenuProps {
     pub theme: Theme,
     pub on_theme_change: Callback<Theme>,
     pub on_back: Callback<()>,
+    pub session_id: String,
+    pub on_handoff_complete: Callback<()>,
 }
 
 #[function_component]
@@ -20,6 +25,8 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
     let camera_enabled = use_state(|| false);
     let input_level = use_state(|| 100u32);
     let output_level = use_state(|| 100u32);
+    let action_error = use_state(|| Option::<String>::None);
+    let action_busy = use_state(|| false);
 
     let open_settings = {
         let is_settings_open = is_settings_open.clone();
@@ -51,6 +58,64 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
         Callback::from(move |next: u32| output_level.set(next))
     };
 
+    let on_create = {
+        let session_id = props.session_id.clone();
+        let action_error = action_error.clone();
+        let action_busy = action_busy.clone();
+        let on_handoff_complete = props.on_handoff_complete.clone();
+        Callback::from(move |_| {
+            if *action_busy {
+                return;
+            }
+            action_busy.set(true);
+            action_error.set(None);
+            let session_id = session_id.clone();
+            let action_error = action_error.clone();
+            let action_busy = action_busy.clone();
+            let on_handoff_complete = on_handoff_complete.clone();
+            spawn_local(async move {
+                match connector_api::create(&session_id).await {
+                    Ok(_response) => on_handoff_complete.emit(()),
+                    Err(err) => action_error.set(Some(err)),
+                }
+                action_busy.set(false);
+            });
+        })
+    };
+
+    let on_join = {
+        let session_id = props.session_id.clone();
+        let action_error = action_error.clone();
+        let action_busy = action_busy.clone();
+        let on_handoff_complete = props.on_handoff_complete.clone();
+        Callback::from(move |_| {
+            if *action_busy {
+                return;
+            }
+            let room_id = match web_sys::window()
+                .and_then(|window| window.prompt_with_message("Enter room UUID").ok())
+                .flatten()
+            {
+                Some(room_id) if !room_id.trim().is_empty() => room_id,
+                _ => return,
+            };
+
+            action_busy.set(true);
+            action_error.set(None);
+            let session_id = session_id.clone();
+            let action_error = action_error.clone();
+            let action_busy = action_busy.clone();
+            let on_handoff_complete = on_handoff_complete.clone();
+            spawn_local(async move {
+                match connector_api::join(&session_id, room_id.trim()).await {
+                    Ok(_response) => on_handoff_complete.emit(()),
+                    Err(err) => action_error.set(Some(err)),
+                }
+                action_busy.set(false);
+            });
+        })
+    };
+
     html! {
         <div class="main-menu font-manrope text-on-background">
             <div class="main-menu__actions main-menu__actions--floating">
@@ -73,7 +138,7 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
                 </header>
 
                 <section class="main-menu__cards">
-                    <button type="button" class="main-menu__card">
+                    <button type="button" class="main-menu__card" onclick={on_create} disabled={*action_busy}>
                         <span class="main-menu__card-icon main-menu__card-icon--primary" aria-hidden="true">
                             { icons::create_plus_icon() }
                         </span>
@@ -81,7 +146,7 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
                         <span class="main-menu__card-text body-md">{ "Start a fresh session and invite your team." }</span>
                     </button>
 
-                    <button type="button" class="main-menu__card">
+                    <button type="button" class="main-menu__card" onclick={on_join} disabled={*action_busy}>
                         <span class="main-menu__card-icon main-menu__card-icon--secondary" aria-hidden="true">
                             { icons::join_enter_icon() }
                         </span>
@@ -89,6 +154,10 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
                         <span class="main-menu__card-text body-md">{ "Enter a link or code to hop right in." }</span>
                     </button>
                 </section>
+
+                if let Some(err) = &*action_error {
+                    <p class="body-md" role="alert">{ err }</p>
+                }
 
                 <button
                     type="button"

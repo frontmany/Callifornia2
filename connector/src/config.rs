@@ -16,7 +16,6 @@ pub struct Config {
     pub redis_connect_timeout: Duration,
     pub redis_op_timeout: Duration,
     pub redis_probe_interval: Duration,
-    pub ws_write_timeout: Duration,
     pub token_secret: String,
     pub token_ttl: Duration,
     pub session_ttl: Duration,
@@ -35,8 +34,6 @@ impl Config {
             duration_from_env("REDIS_OP_TIMEOUT_MS", 800).context("REDIS_OP_TIMEOUT_MS")?;
         let redis_probe_interval = duration_from_env("REDIS_PROBE_INTERVAL_MS", 1_000)
             .context("REDIS_PROBE_INTERVAL_MS")?;
-        let ws_write_timeout =
-            duration_from_env("WS_WRITE_TIMEOUT_MS", 10_000).context("WS_WRITE_TIMEOUT_MS")?;
         let token_secret = get_env_or("CONNECTOR_TOKEN_SECRET", "dev-connector-token-secret");
         let token_ttl = duration_from_env("CONNECTOR_TOKEN_TTL_MS", 120_000)
             .context("CONNECTOR_TOKEN_TTL_MS")?;
@@ -57,7 +54,6 @@ impl Config {
             redis_connect_timeout,
             redis_op_timeout,
             redis_probe_interval,
-            ws_write_timeout,
             token_secret,
             token_ttl,
             session_ttl,

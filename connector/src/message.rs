@@ -3,73 +3,90 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientMessage {
-    Auth { nickname: String },
-    Create,
-    Join { room_id: String },
-    Logout,
+pub struct AuthRequest {
+    pub nickname: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServerMessage {
-    AuthOk {
-        nickname: String,
-        session_id: String,
-    },
-    SignalingReady {
-        signaling_url: String,
-        session_id: String,
-        token: String,
-    },
-    LoggedOut,
-    Error {
-        code: ServerErrorCode,
-        message: String,
-    },
+pub struct AuthResponse {
+    pub nickname: String,
+    pub session_id: String,
 }
 
-/// Wire codes for `ServerMessage::Error` on the connector WebSocket API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinRequest {
+    pub session_id: String,
+    pub room_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogoutRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalingReadyResponse {
+    pub signaling_url: String,
+    pub session_id: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorResponse {
+    pub code: ServerErrorCode,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerErrorCode {
-    // Protocol
-    InvalidJson,
     InvalidPayload,
-
-    // Auth / session
     Unauthorized,
     NicknameTaken,
     RoomNotFound,
-
-    // Infrastructure
     StorageUnavailable,
-    /// No signaling instance has a fresh heartbeat in `signaling:nodes`.
     NoHealthySignaling,
-    /// Room route names an instance id not present in connector config.
     UnknownSignalingRoute,
     TokenIssueFailed,
-
-    /// Failed to write an outbound WebSocket frame or serialize payload.
-    WriteFailed,
 }
 
 #[derive(Debug, Error)]
 pub enum ValidationError {
     #[error("nickname must be 3..32 characters and contain only letters, digits, '_' or '-'")]
     InvalidNickname,
+    #[error("session_id must be a valid UUID")]
+    InvalidSessionId,
     #[error("room_id must be a valid UUID")]
     InvalidRoomId,
 }
 
-impl ClientMessage {
+impl AuthRequest {
     pub fn validate(&self) -> Result<(), ValidationError> {
-        match self {
-            ClientMessage::Auth { nickname } => validate_nickname(nickname),
-            ClientMessage::Join { room_id } => validate_room_id(room_id),
-            ClientMessage::Create | ClientMessage::Logout => Ok(()),
-        }
+        validate_nickname(&self.nickname)
+    }
+}
+
+impl CreateRequest {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_session_id(&self.session_id)
+    }
+}
+
+impl JoinRequest {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_session_id(&self.session_id)?;
+        validate_room_id(&self.room_id)
+    }
+}
+
+impl LogoutRequest {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_session_id(&self.session_id)
     }
 }
 
@@ -94,4 +111,10 @@ fn validate_room_id(room_id: &str) -> Result<(), ValidationError> {
     Uuid::parse_str(room_id)
         .map(|_| ())
         .map_err(|_| ValidationError::InvalidRoomId)
+}
+
+fn validate_session_id(session_id: &str) -> Result<(), ValidationError> {
+    Uuid::parse_str(session_id)
+        .map(|_| ())
+        .map_err(|_| ValidationError::InvalidSessionId)
 }
