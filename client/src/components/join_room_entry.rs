@@ -1,7 +1,7 @@
 use crate::components::SettingsPanel;
 use crate::app::SettingsState;
 use crate::theme::Theme;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlFormElement, HtmlInputElement, KeyboardEvent};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -23,6 +23,7 @@ pub fn JoinRoomEntry(props: &JoinRoomEntryProps) -> Html {
     let is_settings_open = use_state(|| false);
     let room_target = use_state(String::new);
     let validation_error = use_state(|| Option::<String>::None);
+    let form_ref = use_node_ref();
 
     let open_settings = {
         let is_settings_open = is_settings_open.clone();
@@ -50,12 +51,11 @@ pub fn JoinRoomEntry(props: &JoinRoomEntryProps) -> Html {
         })
     };
 
-    let on_submit = {
+    let run_submit = {
         let room_target = room_target.clone();
         let validation_error = validation_error.clone();
-        Callback::from(move |event: SubmitEvent| {
-            event.prevent_default();
-            let value = room_target.trim().to_owned();
+        Callback::from(move |_| {
+            let value = (*room_target).trim().to_owned();
             if value.is_empty() {
                 validation_error.set(Some("Enter a room ID.".to_owned()));
                 return;
@@ -63,6 +63,28 @@ pub fn JoinRoomEntry(props: &JoinRoomEntryProps) -> Html {
 
             validation_error.set(None);
             // TODO: call join-room API with `value` when backend flow is finalized.
+        })
+    };
+
+    let on_submit = {
+        let run_submit = run_submit.clone();
+        Callback::from(move |event: SubmitEvent| {
+            event.prevent_default();
+            run_submit.emit(());
+        })
+    };
+
+    let on_input_keydown = {
+        let form_ref = form_ref.clone();
+        Callback::from(move |event: KeyboardEvent| {
+            let key = event.key();
+            if key != "Enter" && key != "NumpadEnter" {
+                return;
+            }
+            event.prevent_default();
+            if let Some(form) = form_ref.cast::<HtmlFormElement>() {
+                let _ = form.request_submit();
+            }
         })
     };
 
@@ -115,14 +137,15 @@ pub fn JoinRoomEntry(props: &JoinRoomEntryProps) -> Html {
                 <h1 class="join-room-entry__title h1">{ "Join Room" }</h1>
                 <p class="join-room-entry__subtitle body-md">{ "Enter your room ID to connect in seconds." }</p>
 
-                <form class="join-room-entry__form" onsubmit={on_submit}>
+                <form ref={form_ref} class="join-room-entry__form" onsubmit={on_submit}>
                     <input
                         id="join-room-input"
                         class={input_classes}
                         type="text"
                         value={(*room_target).clone()}
                         oninput={on_input}
-                        placeholder="e.g. 33fa5b65-..."
+                        onkeydown={on_input_keydown}
+                        placeholder="e.g. 33fa5b65"
                         autocomplete="off"
                     />
                     <p class="join-room-entry__hint body-md">{ "Room ID only. Use the code shared by the room host" }</p>

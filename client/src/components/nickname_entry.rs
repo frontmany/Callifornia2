@@ -94,8 +94,8 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
                     <img
                         class="nickname-entry__avatar-logo"
                         src={LOGO_PNG_DATA_URL.as_str()}
-                        width="52"
-                        height="52"
+                        width="62"
+                        height="62"
                         alt=""
                     />
                 </div>
