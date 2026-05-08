@@ -1,10 +1,9 @@
-//! Temporary device data for pre-join settings UI.
+//! Temporary device data for settings panel UI.
 //!
 //! NOTE: This file intentionally contains stubs. Replace these lists with
 //! browser-provided devices from `navigator.mediaDevices.enumerateDevices()`
 //! once media wiring is implemented.
 
-/// Logical category of media device shown in the left-panel tabs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeviceKind {
     Input,
@@ -30,30 +29,19 @@ impl DeviceKind {
     }
 }
 
-/// UI row model for a discovered media device.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct DeviceEntry {
-    /// Stable identifier for list selection.
     pub id: &'static str,
-    /// Human readable label shown to the user.
     pub label: &'static str,
 }
 
-/// All device groups used by [`crate::components::DeviceSettingsLeftPanel`].
+/// All device groups used by [`crate::components::SettingsPanel`].
 pub struct DeviceCatalog {
     pub inputs: &'static [DeviceEntry],
     pub outputs: &'static [DeviceEntry],
     pub cameras: &'static [DeviceEntry],
 }
 
-/// Returns static placeholder devices until runtime detection is connected.
-///
-/// TODO(real devices):
-/// - request permissions on user action (mic/camera preview),
-/// - call `enumerateDevices()`,
-/// - group by kind (`audioinput`, `audiooutput`, `videoinput`),
-/// - map to `DeviceEntry { id, label }`,
-/// - fallback label when browser returns empty name before permission.
 pub fn stub_device_catalog() -> DeviceCatalog {
     const INPUTS: &[DeviceEntry] = &[
         DeviceEntry {
@@ -102,4 +90,3 @@ pub fn stub_device_catalog() -> DeviceCatalog {
         cameras: CAMERAS,
     }
 }
-

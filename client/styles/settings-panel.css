@@ -1,4 +1,4 @@
-.device-settings-left-panel {
+.settings-panel {
     position: fixed;
     inset: 0;
     z-index: 120;
@@ -9,7 +9,7 @@
     pointer-events: none;
 }
 
-.device-settings-left-panel__backdrop {
+.settings-panel__backdrop {
     position: fixed;
     inset: 0;
     border: 0;
@@ -20,11 +20,11 @@
     pointer-events: auto;
 }
 
-html.dark .device-settings-left-panel__backdrop {
+html.dark .settings-panel__backdrop {
     background: #182230;
 }
 
-.device-settings-left-panel__panel {
+.settings-panel__panel {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 1;
@@ -38,10 +38,10 @@ html.dark .device-settings-left-panel__backdrop {
     overflow: hidden;
     box-shadow: var(--shadow-card);
     pointer-events: auto;
-    animation: device-settings-left-panel-slide-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+    animation: settings-panel-slide-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.device-settings-left-panel__nav {
+.settings-panel__nav {
     width: 210px;
     flex-shrink: 0;
     background: #eef2fa;
@@ -51,14 +51,14 @@ html.dark .device-settings-left-panel__backdrop {
     flex-direction: column;
 }
 
-.device-settings-left-panel__nav-title {
+.settings-panel__nav-title {
     margin: 0 0 18px;
     font-size: 14px;
     font-weight: 700;
     color: var(--text-primary);
 }
 
-.device-settings-left-panel__nav-btn {
+.settings-panel__nav-btn {
     width: 100%;
     min-height: 40px;
     margin-bottom: 12px;
@@ -75,16 +75,16 @@ html.dark .device-settings-left-panel__backdrop {
     transition: background-color 0.18s ease, color 0.18s ease;
 }
 
-.device-settings-left-panel__nav-btn:hover {
+.settings-panel__nav-btn:hover {
     color: var(--text-primary);
 }
 
-.device-settings-left-panel__nav-btn--active {
+.settings-panel__nav-btn--active {
     background: #d8e9ff;
     color: var(--text-primary);
 }
 
-.device-settings-left-panel__quick-toggles {
+.settings-panel__quick-toggles {
     margin-top: auto;
     display: flex;
     align-items: center;
@@ -93,7 +93,36 @@ html.dark .device-settings-left-panel__backdrop {
     padding-top: 12px;
 }
 
-.device-settings-left-panel__quick-btn {
+.settings-panel__theme-switch {
+    width: 100%;
+    height: 40px;
+    margin: 0 0 12px;
+    padding: 10px 12px 10px 16px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.settings-panel__theme-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: var(--text-muted);
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.settings-panel__theme-switch .theme-toggle {
+    position: static;
+    top: auto;
+    right: auto;
+    z-index: auto;
+}
+
+.settings-panel__quick-btn {
     width: 48px;
     height: 48px;
     border: 1px solid transparent;
@@ -107,31 +136,19 @@ html.dark .device-settings-left-panel__backdrop {
     transition: color 0.18s ease, filter 0.18s ease, transform 0.1s ease;
 }
 
-.device-settings-left-panel__quick-btn--on {
-    color: #1358a7;
-}
+.settings-panel__quick-btn--on { color: #1358a7; }
+.settings-panel__quick-btn--off { color: #7e8ea5; }
+.settings-panel__quick-btn:hover { filter: brightness(0.92); }
+.settings-panel__quick-btn:active { transform: scale(0.96); }
 
-.device-settings-left-panel__quick-btn--off {
-    color: #7e8ea5;
-}
-
-.device-settings-left-panel__quick-btn:hover {
-    filter: brightness(0.92);
-}
-
-.device-settings-left-panel__quick-btn:active {
-    transform: scale(0.96);
-}
-
-.device-settings-left-panel__quick-icon {
+.settings-panel__quick-icon {
     width: 24px;
     height: 24px;
     object-fit: contain;
     display: block;
 }
 
-
-.device-settings-left-panel__main {
+.settings-panel__main {
     flex: 1;
     min-width: 0;
     display: flex;
@@ -139,7 +156,7 @@ html.dark .device-settings-left-panel__backdrop {
     background: transparent;
 }
 
-.device-settings-left-panel__header {
+.settings-panel__header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -147,7 +164,7 @@ html.dark .device-settings-left-panel__backdrop {
     gap: 12px;
 }
 
-.device-settings-left-panel__section-title {
+.settings-panel__section-title {
     margin: 0;
     font-size: 18px;
     font-weight: 700;
@@ -155,7 +172,7 @@ html.dark .device-settings-left-panel__backdrop {
     letter-spacing: 0.2px;
 }
 
-.device-settings-left-panel__close {
+.settings-panel__close {
     width: 36px;
     height: 36px;
     border: 0;
@@ -171,15 +188,10 @@ html.dark .device-settings-left-panel__backdrop {
     transition: color 0.18s ease, transform 0.1s ease;
 }
 
-.device-settings-left-panel__close:hover {
-    color: var(--color-primary);
-}
+.settings-panel__close:hover { color: var(--color-primary); }
+.settings-panel__close:active { transform: scale(0.96); }
 
-.device-settings-left-panel__close:active {
-    transform: scale(0.96);
-}
-
-.device-settings-left-panel__list {
+.settings-panel__list {
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -188,11 +200,9 @@ html.dark .device-settings-left-panel__backdrop {
     overflow-y: auto;
 }
 
-.device-settings-left-panel__slider-row {
-    padding: 0 28px 24px;
-}
+.settings-panel__slider-row { padding: 0 28px 24px; }
 
-.device-settings-left-panel__slider {
+.settings-panel__slider {
     width: 100%;
     margin: 0;
     accent-color: var(--color-primary);
@@ -203,7 +213,7 @@ html.dark .device-settings-left-panel__backdrop {
     --pct: 50%;
 }
 
-.device-settings-left-panel__slider::-webkit-slider-runnable-track {
+.settings-panel__slider::-webkit-slider-runnable-track {
     height: 8px;
     border: 0;
     border-radius: 999px;
@@ -216,7 +226,7 @@ html.dark .device-settings-left-panel__backdrop {
     );
 }
 
-.device-settings-left-panel__slider::-webkit-slider-thumb {
+.settings-panel__slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 18px;
@@ -228,21 +238,21 @@ html.dark .device-settings-left-panel__backdrop {
     box-shadow: 0 1px 4px rgba(16, 22, 30, 0.28);
 }
 
-.device-settings-left-panel__slider::-moz-range-track {
+.settings-panel__slider::-moz-range-track {
     height: 8px;
     border: 0;
     border-radius: 999px;
     background: #bcc5d2;
 }
 
-.device-settings-left-panel__slider::-moz-range-progress {
+.settings-panel__slider::-moz-range-progress {
     height: 8px;
     border: 0;
     border-radius: 999px;
     background: var(--color-primary);
 }
 
-.device-settings-left-panel__slider::-moz-range-thumb {
+.settings-panel__slider::-moz-range-thumb {
     width: 18px;
     height: 18px;
     border: 0;
@@ -251,8 +261,8 @@ html.dark .device-settings-left-panel__backdrop {
     box-shadow: 0 1px 4px rgba(16, 22, 30, 0.28);
 }
 
-html.dark .device-settings-left-panel__slider::-webkit-slider-runnable-track,
-html.dark .device-settings-left-panel__slider::-moz-range-track {
+html.dark .settings-panel__slider::-webkit-slider-runnable-track,
+html.dark .settings-panel__slider::-moz-range-track {
     background: linear-gradient(
         to right,
         var(--color-primary) 0%,
@@ -262,13 +272,13 @@ html.dark .device-settings-left-panel__slider::-moz-range-track {
     );
 }
 
-html.dark .device-settings-left-panel__slider::-webkit-slider-thumb,
-html.dark .device-settings-left-panel__slider::-moz-range-thumb {
+html.dark .settings-panel__slider::-webkit-slider-thumb,
+html.dark .settings-panel__slider::-moz-range-thumb {
     background: #8ebdff;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
-.device-settings-left-panel__item {
+.settings-panel__item {
     width: 100%;
     min-height: 46px;
     border: 0;
@@ -284,115 +294,65 @@ html.dark .device-settings-left-panel__slider::-moz-range-thumb {
     transition: background-color 0.16s ease, color 0.16s ease;
 }
 
-.device-settings-left-panel__item:hover {
-    background: #e8f2ff;
-}
-
-.device-settings-left-panel__item--selected {
+.settings-panel__item:hover { background: #e8f2ff; }
+.settings-panel__item--selected {
     background: #d8e9ff;
     color: var(--text-primary);
     font-weight: 600;
 }
 
-html.dark .device-settings-left-panel__panel {
+html.dark .settings-panel__panel {
     border-color: var(--card-border);
     background: #1b2330;
     box-shadow: var(--shadow-card);
 }
 
-html.dark .device-settings-left-panel__nav {
-    background: #202b3b;
-}
-
-html.dark .device-settings-left-panel__nav-title {
-    color: var(--text-primary);
-}
-
-html.dark .device-settings-left-panel__nav-btn {
-    color: var(--text-muted);
-}
-
-html.dark .device-settings-left-panel__nav-btn:hover {
-    color: var(--text-primary);
-}
-
-html.dark .device-settings-left-panel__nav-btn--active {
+html.dark .settings-panel__nav { background: #202b3b; }
+html.dark .settings-panel__nav-title { color: var(--text-primary); }
+html.dark .settings-panel__nav-btn { color: var(--text-muted); }
+html.dark .settings-panel__nav-btn:hover { color: var(--text-primary); }
+html.dark .settings-panel__nav-btn--active {
     background: #2c4f78;
     color: var(--text-primary);
 }
 
-html.dark .device-settings-left-panel__quick-btn {
+html.dark .settings-panel__quick-btn {
     background: transparent;
     border-color: transparent;
 }
-
-html.dark .device-settings-left-panel__quick-btn--on {
-    color: #f3f8ff;
-}
-
-html.dark .device-settings-left-panel__quick-btn--off {
-    color: #89a0bf;
-}
-
-html.dark .device-settings-left-panel__quick-btn--on .device-settings-left-panel__quick-icon {
+html.dark .settings-panel__quick-btn--on { color: #f3f8ff; }
+html.dark .settings-panel__quick-btn--off { color: #89a0bf; }
+html.dark .settings-panel__quick-btn--on .settings-panel__quick-icon {
     filter: brightness(0) saturate(100%) invert(76%) sepia(14%) saturate(542%) hue-rotate(176deg) brightness(94%) contrast(93%);
 }
+html.dark .settings-panel__quick-btn:hover { filter: brightness(1.12); }
 
-html.dark .device-settings-left-panel__quick-btn:hover {
-    filter: brightness(1.12);
-}
-
-html.dark .device-settings-left-panel__main {
-    background: #1b2330;
-}
-
-html.dark .device-settings-left-panel__section-title,
-html.dark .device-settings-left-panel__close {
-    color: var(--text-primary);
-}
-
-html.dark .device-settings-left-panel__close:hover {
-    color: var(--color-primary);
-}
-
-html.dark .device-settings-left-panel__item {
-    color: var(--text-primary);
-}
-
-html.dark .device-settings-left-panel__item:hover {
-    background: #284566;
-}
-
-html.dark .device-settings-left-panel__item--selected {
+html.dark .settings-panel__main { background: #1b2330; }
+html.dark .settings-panel__section-title,
+html.dark .settings-panel__close { color: var(--text-primary); }
+html.dark .settings-panel__close:hover { color: var(--color-primary); }
+html.dark .settings-panel__item { color: var(--text-primary); }
+html.dark .settings-panel__item:hover { background: #284566; }
+html.dark .settings-panel__item--selected {
     background: #2c4f78;
     color: var(--text-primary);
 }
 
 @media (max-width: 700px) {
-    .device-settings-left-panel__panel {
+    .settings-panel__panel {
         width: min(100%, 560px);
         border-radius: 0 16px 16px 0;
     }
-
-    .device-settings-left-panel__nav {
+    .settings-panel__nav {
         width: 176px;
         padding: 22px 16px 20px 16px;
     }
-
-    .device-settings-left-panel__header {
-        padding: 20px 20px 0 20px;
-    }
-
-    .device-settings-left-panel__list {
-        padding: 18px 20px 22px;
-    }
-
-    .device-settings-left-panel__slider-row {
-        padding: 0 20px 20px;
-    }
+    .settings-panel__header { padding: 20px 20px 0 20px; }
+    .settings-panel__list { padding: 18px 20px 22px; }
+    .settings-panel__slider-row { padding: 0 20px 20px; }
 }
 
-@keyframes device-settings-left-panel-slide-in {
+@keyframes settings-panel-slide-in {
     from {
         transform: translateX(-24px);
         opacity: 0;
@@ -402,4 +362,3 @@ html.dark .device-settings-left-panel__item--selected {
         opacity: 1;
     }
 }
-

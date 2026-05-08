@@ -1,8 +1,10 @@
-//! Left-side pre-join panel for media device choices.
+//! Global settings panel.
 
-#[path = "device_settings_left_panel/data.rs"]
+#[path = "settings_panel/data.rs"]
 mod data;
 
+use crate::components::ThemeToggle;
+use crate::theme::Theme;
 use data::{stub_device_catalog, DeviceEntry, DeviceKind};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -12,8 +14,10 @@ const MAX_LEVEL: u32 = 200;
 const DEFAULT_LEVEL: u32 = 100;
 
 #[derive(Properties, PartialEq)]
-pub struct DeviceSettingsLeftPanelProps {
+pub struct SettingsPanelProps {
     pub on_close: Callback<()>,
+    pub theme: Theme,
+    pub on_theme_change: Callback<Theme>,
     pub mic_enabled: bool,
     pub camera_enabled: bool,
     pub input_level: u32,
@@ -25,10 +29,8 @@ pub struct DeviceSettingsLeftPanelProps {
 }
 
 #[function_component]
-pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
+pub fn SettingsPanel(props: &SettingsPanelProps) -> Html {
     let tab = use_state(|| DeviceKind::Input);
-
-    // NOTE: Device source is currently static (`stub_device_catalog`).
     let catalog = stub_device_catalog();
 
     let input_selected = use_state(|| catalog.inputs[0].id);
@@ -45,36 +47,41 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
     };
 
     html! {
-        <div class="device-settings-left-panel" role="presentation">
+        <div class="settings-panel" role="presentation">
             <button
                 type="button"
-                class="device-settings-left-panel__backdrop"
+                class="settings-panel__backdrop"
                 aria-hidden="true"
                 tabindex="-1"
                 onclick={props.on_close.reform(|_| ())}
             />
 
             <div
-                class="device-settings-left-panel__panel font-manrope text-on-background"
+                class="settings-panel__panel font-manrope text-on-background"
                 role="dialog"
                 aria-modal="true"
-                aria-labelledby="device-settings-title"
+                aria-labelledby="settings-panel-title"
             >
-                <nav class="device-settings-left-panel__nav" aria-label="Device settings sections">
-                    <h2 class="device-settings-left-panel__nav-title">{ "Device Center" }</h2>
+                <nav class="settings-panel__nav" aria-label="Settings sections">
+                    <h2 class="settings-panel__nav-title">{ "Settings" }</h2>
                     { tab_button(DeviceKind::Input, tab.clone()) }
                     { tab_button(DeviceKind::Output, tab.clone()) }
                     { tab_button(DeviceKind::Camera, tab.clone()) }
 
-                    <div class="device-settings-left-panel__quick-toggles" aria-label="Quick media toggles">
+                    <div class="settings-panel__theme-switch">
+                        <span class="settings-panel__theme-label">{ "Theme" }</span>
+                        <ThemeToggle theme={props.theme} on_change={props.on_theme_change.clone()} />
+                    </div>
+
+                    <div class="settings-panel__quick-toggles" aria-label="Quick media toggles">
                         <button
                             type="button"
                             class={classes!(
-                                "device-settings-left-panel__quick-btn",
+                                "settings-panel__quick-btn",
                                 if props.mic_enabled {
-                                    Some("device-settings-left-panel__quick-btn--on")
+                                    Some("settings-panel__quick-btn--on")
                                 } else {
-                                    Some("device-settings-left-panel__quick-btn--off")
+                                    Some("settings-panel__quick-btn--off")
                                 }
                             )}
                             onclick={props.on_toggle_mic.reform(|_| ())}
@@ -82,7 +89,7 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
                             title={if props.mic_enabled { "Microphone on" } else { "Microphone off" }}
                         >
                             <img
-                                class="device-settings-left-panel__quick-icon"
+                                class="settings-panel__quick-icon"
                                 src={if props.mic_enabled {
                                     "icons/microphone.svg"
                                 } else {
@@ -96,11 +103,11 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
                         <button
                             type="button"
                             class={classes!(
-                                "device-settings-left-panel__quick-btn",
+                                "settings-panel__quick-btn",
                                 if props.camera_enabled {
-                                    Some("device-settings-left-panel__quick-btn--on")
+                                    Some("settings-panel__quick-btn--on")
                                 } else {
-                                    Some("device-settings-left-panel__quick-btn--off")
+                                    Some("settings-panel__quick-btn--off")
                                 }
                             )}
                             onclick={props.on_toggle_camera.reform(|_| ())}
@@ -108,7 +115,7 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
                             title={if props.camera_enabled { "Camera on" } else { "Camera off" }}
                         >
                             <img
-                                class="device-settings-left-panel__quick-icon"
+                                class="settings-panel__quick-icon"
                                 src={if props.camera_enabled {
                                     "icons/camera.svg"
                                 } else {
@@ -121,12 +128,12 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
                     </div>
                 </nav>
 
-                <section class="device-settings-left-panel__main">
-                    <header class="device-settings-left-panel__header">
-                        <h3 id="device-settings-title" class="device-settings-left-panel__section-title">{ (*tab).title() }</h3>
+                <section class="settings-panel__main">
+                    <header class="settings-panel__header">
+                        <h3 id="settings-panel-title" class="settings-panel__section-title">{ (*tab).title() }</h3>
                         <button
                             type="button"
-                            class="device-settings-left-panel__close"
+                            class="settings-panel__close"
                             aria-label="Close"
                             onclick={props.on_close.reform(|_| ())}
                         >
@@ -137,13 +144,13 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
                     { current_list }
 
                     if matches!(*tab, DeviceKind::Input) {
-                        <div class="device-settings-left-panel__slider-row">
+                        <div class="settings-panel__slider-row">
                             { level_slider(props.input_level, on_input_level) }
                         </div>
                     }
 
                     if matches!(*tab, DeviceKind::Output) {
-                        <div class="device-settings-left-panel__slider-row">
+                        <div class="settings-panel__slider-row">
                             { level_slider(props.output_level, on_output_level) }
                         </div>
                     }
@@ -156,8 +163,8 @@ pub fn DeviceSettingsLeftPanel(props: &DeviceSettingsLeftPanelProps) -> Html {
 fn tab_button(tab_kind: DeviceKind, selected: UseStateHandle<DeviceKind>) -> Html {
     let is_active = *selected == tab_kind;
     let class_name = classes!(
-        "device-settings-left-panel__nav-btn",
-        is_active.then_some("device-settings-left-panel__nav-btn--active")
+        "settings-panel__nav-btn",
+        is_active.then_some("settings-panel__nav-btn--active")
     );
     let onclick = {
         let selected = selected.clone();
@@ -173,11 +180,11 @@ fn tab_button(tab_kind: DeviceKind, selected: UseStateHandle<DeviceKind>) -> Htm
 
 fn render_device_list(devices: &[DeviceEntry], selected: UseStateHandle<&'static str>) -> Html {
     html! {
-        <div class="device-settings-left-panel__list">
+        <div class="settings-panel__list">
             {
                 for devices.iter().map(|entry| {
                     let is_selected = *selected == entry.id;
-                    let selected_class = is_selected.then_some("device-settings-left-panel__item--selected");
+                    let selected_class = is_selected.then_some("settings-panel__item--selected");
                     let onclick = {
                         let selected = selected.clone();
                         let id = entry.id;
@@ -186,7 +193,7 @@ fn render_device_list(devices: &[DeviceEntry], selected: UseStateHandle<&'static
                     html! {
                         <button
                             type="button"
-                            class={classes!("device-settings-left-panel__item", selected_class)}
+                            class={classes!("settings-panel__item", selected_class)}
                             onclick={onclick}
                         >
                             <span>{ entry.label }</span>
@@ -214,7 +221,7 @@ fn level_slider(value: u32, oninput: Callback<InputEvent>) -> Html {
     let pct = (value as f32 / MAX_LEVEL as f32) * 100.0;
     html! {
         <input
-            class="device-settings-left-panel__slider"
+            class="settings-panel__slider"
             type="range"
             min={MIN_LEVEL.to_string()}
             max={MAX_LEVEL.to_string()}

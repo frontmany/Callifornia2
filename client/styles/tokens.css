@@ -95,12 +95,12 @@ html.dark {
     --theme-toggle-track-bg: rgba(24, 29, 39, 0.62);
     --theme-toggle-track-border: rgba(239, 240, 250, 0.14);
     --theme-toggle-focus-ring: rgba(255, 255, 255, 0.38);
-    --theme-toggle-thumb-bg: #ffffff;
-    --theme-toggle-thumb-border: rgba(239, 240, 250, 0.58);
+    --theme-toggle-thumb-bg: #2a3040;
+    --theme-toggle-thumb-border: rgba(239, 240, 250, 0.2);
     --theme-toggle-thumb-shadow:
         0 4px 14px rgba(0, 0, 0, 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.55);
-    --theme-toggle-thumb-bg-hover: #f5f6fc;
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    --theme-toggle-thumb-bg-hover: #323a4d;
     --theme-toggle-sunspot: radial-gradient(
         circle at 22% 50%,
         rgba(255, 255, 255, 0.22) 0%,

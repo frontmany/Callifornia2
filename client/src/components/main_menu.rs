@@ -3,7 +3,7 @@
 #[path = "main_menu/icons.rs"]
 mod icons;
 
-use crate::components::{DeviceSettingsLeftPanel, ThemeToggle};
+use crate::components::SettingsPanel;
 use crate::connector_api;
 use crate::theme::Theme;
 use wasm_bindgen_futures::spawn_local;
@@ -119,7 +119,6 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
     html! {
         <div class="main-menu font-manrope text-on-background">
             <div class="main-menu__actions main-menu__actions--floating">
-                <ThemeToggle theme={props.theme} on_change={props.on_theme_change.clone()} />
                 <button
                     type="button"
                     class="main-menu__icon-btn main-menu__icon-btn--settings"
@@ -172,8 +171,10 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
             </main>
 
             if *is_settings_open {
-                <DeviceSettingsLeftPanel
+                <SettingsPanel
                     on_close={close_settings}
+                    theme={props.theme}
+                    on_theme_change={props.on_theme_change.clone()}
                     mic_enabled={*mic_enabled}
                     camera_enabled={*camera_enabled}
                     input_level={*input_level}

@@ -1,6 +1,6 @@
 //! Root shell: wires components and document-wide effects (e.g. theme class on `<html>`).
 
-use crate::components::{MainMenu, NicknameEntry, ThemeToggle};
+use crate::components::{MainMenu, NicknameEntry};
 use crate::connector_api::logout_best_effort;
 use crate::theme::Theme;
 use wasm_bindgen::closure::Closure;
@@ -10,7 +10,7 @@ use yew::prelude::*;
 
 #[function_component]
 pub fn App() -> Html {
-    let theme = use_state(|| Theme::Light);
+    let theme = use_state(initial_theme_from_system);
     let screen = use_state(|| AppScreen::Nickname);
     let session_id = use_state(|| Option::<String>::None);
     let handoff_complete = use_state(|| false);
@@ -97,7 +97,6 @@ pub fn App() -> Html {
         match *screen {
             AppScreen::Nickname => html! {
                 <>
-                    <ThemeToggle theme={*theme} on_change={on_theme.clone()} />
                     <NicknameEntry on_success={on_nickname_success} />
                 </>
             },
@@ -118,4 +117,16 @@ pub fn App() -> Html {
 enum AppScreen {
     Nickname,
     MainMenu,
+}
+
+fn initial_theme_from_system() -> Theme {
+    // TODO: keep theme fully system-driven; do not persist or restore user override.
+    let Some(window) = web_sys::window() else {
+        return Theme::Light;
+    };
+
+    match window.match_media("(prefers-color-scheme: dark)") {
+        Ok(Some(media_query)) if media_query.matches() => Theme::Dark,
+        _ => Theme::Light,
+    }
 }
