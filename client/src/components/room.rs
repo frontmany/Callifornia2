@@ -61,6 +61,9 @@ pub struct RoomProps {
     pub on_speaker_device_change: Callback<&'static str>,
     pub on_camera_device_change: Callback<&'static str>,
     pub on_end_call: Callback<()>,
+    /// Call with `true` when the signaling WebSocket opens and `false` on close; parent stops connector `/session/renew` while `true`.
+    #[prop_or_default]
+    pub on_signaling_connected: Option<Callback<bool>>,
     /// Set to `true` when another participant is presenting; triggers the same
     /// screen-share layout as a local presentation.
     #[prop_or_default]

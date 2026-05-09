@@ -41,6 +41,38 @@ struct LogoutRequest<'a> {
     session_id: &'a str,
 }
 
+#[derive(Debug, Serialize)]
+struct SessionRenewRequest<'a> {
+    session_id: &'a str,
+}
+
+/// Refreshes Redis session TTL while the user is idle on HTTP (nick keys no longer expire).
+/// Call periodically (e.g. before `SESSION_TTL_SEC` elapses) when not connected over WebSocket.
+pub async fn renew_session(session_id: &str) -> Result<(), String> {
+    let _ = session_id;
+    // DEV STUB: network is disabled during UI-only development.
+    // Real request (kept commented for quick restore):
+    // let body = serde_json::to_string(&SessionRenewRequest { session_id })
+    //     .map_err(|err| err.to_string())?;
+    // let response = Request::post(&endpoint("/session/renew"))
+    //     .header("content-type", "application/json")
+    //     .body(body)
+    //     .map_err(|err| err.to_string())?
+    //     .send()
+    //     .await
+    //     .map_err(|err| err.to_string())?;
+    // let status = response.status();
+    // if (200..300).contains(&status) {
+    //     Ok(())
+    // } else {
+    //     match response.json::<ServiceErrorPayload>().await {
+    //         Ok(err) => Err(err.message),
+    //         Err(_) => Err(status_error_message(status).to_owned()),
+    //     }
+    // }
+    Ok(())
+}
+
 pub async fn auth(nickname: &str) -> Result<AuthResponse, String> {
     // DEV STUB: network is disabled during UI-only development.
     // Real request (kept commented for quick restore):

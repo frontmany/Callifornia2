@@ -933,11 +933,10 @@ async fn handle_create_locked(
     Ok(())
 }
 
-fn spawn_lease_renewer(state: State, session_id: String, nickname: String) -> LeaseRenewerHandle {
+fn spawn_lease_renewer(state: State, session_id: String, _nickname: String) -> LeaseRenewerHandle {
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
-    let renew_interval = state.config.nick_lease_renew;
-    let nick_ttl = state.config.nick_lease_ttl;
-    let session_ttl = std::time::Duration::from_secs(600);
+    let renew_interval = state.config.session_renew_interval;
+    let session_ttl = state.config.session_ttl;
 
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(renew_interval);
@@ -949,11 +948,6 @@ fn spawn_lease_renewer(state: State, session_id: String, nickname: String) -> Le
                 _ = ticker.tick() => {
                     if !state.is_redis_available().await {
                         continue;
-                    }
-                    if let Err(err) =
-                        redis::renew_nick_lease(&state.redis, &nickname, &session_id, nick_ttl).await
-                    {
-                        warn!(error = %err, nickname = %nickname, "failed to renew nick lease");
                     }
                     if let Err(err) =
                         redis::renew_session_ttl(&state.redis, &session_id, session_ttl).await

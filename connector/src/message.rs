@@ -29,6 +29,12 @@ pub struct LogoutRequest {
     pub session_id: String,
 }
 
+/// Explicit session TTL refresh (nick reservation has no separate TTL).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRenewRequest {
+    pub session_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalingReadyResponse {
     pub signaling_url: String,
@@ -85,6 +91,12 @@ impl JoinRequest {
 }
 
 impl LogoutRequest {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_session_id(&self.session_id)
+    }
+}
+
+impl SessionRenewRequest {
     pub fn validate(&self) -> Result<(), ValidationError> {
         validate_session_id(&self.session_id)
     }

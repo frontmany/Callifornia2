@@ -26,8 +26,10 @@ pub struct Config {
     pub peer_outbound_capacity: usize,
     pub signaling_heartbeat: Duration,
     pub session_lock_ttl: Duration,
-    pub nick_lease_ttl: Duration,
-    pub nick_lease_renew: Duration,
+    /// Redis session hash TTL (aligned with connector `SESSION_TTL_SEC`).
+    pub session_ttl: Duration,
+    /// How often the WS handler refreshes session TTL while connected.
+    pub session_renew_interval: Duration,
 }
 
 impl Config {
@@ -75,10 +77,10 @@ impl Config {
             .context("SIGNALING_HEARTBEAT_SEC")?;
         let session_lock_ttl =
             duration_from_env("SESSION_LOCK_TTL_MS", 5_000).context("SESSION_LOCK_TTL_MS")?;
-        let nick_lease_ttl =
-            duration_from_secs_env("NICK_LEASE_TTL_SEC", 30).context("NICK_LEASE_TTL_SEC")?;
-        let nick_lease_renew =
-            duration_from_secs_env("NICK_LEASE_RENEW_SEC", 10).context("NICK_LEASE_RENEW_SEC")?;
+        let session_ttl =
+            duration_from_secs_env("SESSION_TTL_SEC", 600).context("SESSION_TTL_SEC")?;
+        let session_renew_interval =
+            duration_from_secs_env("SESSION_RENEW_SEC", 60).context("SESSION_RENEW_SEC")?;
 
         Ok(Self {
             signaling_addr,
@@ -101,8 +103,8 @@ impl Config {
             peer_outbound_capacity,
             signaling_heartbeat,
             session_lock_ttl,
-            nick_lease_ttl,
-            nick_lease_renew,
+            session_ttl,
+            session_renew_interval,
         })
     }
 

@@ -19,7 +19,6 @@ pub struct Config {
     pub token_secret: String,
     pub token_ttl: Duration,
     pub session_ttl: Duration,
-    pub nick_lease_ttl: Duration,
     pub signaling_stale_timeout: Duration,
     pub signaling_instances: Vec<SignalingInstance>,
 }
@@ -39,8 +38,6 @@ impl Config {
             .context("CONNECTOR_TOKEN_TTL_MS")?;
         let session_ttl =
             duration_from_secs_env("SESSION_TTL_SEC", 600).context("SESSION_TTL_SEC")?;
-        let nick_lease_ttl =
-            duration_from_secs_env("NICK_LEASE_TTL_SEC", 30).context("NICK_LEASE_TTL_SEC")?;
         let signaling_stale_timeout = duration_from_secs_env("SIGNALING_STALE_SEC", 30)
             .context("SIGNALING_STALE_SEC")?;
         let signaling_instances = parse_signaling_instances(&get_env_or(
@@ -57,7 +54,6 @@ impl Config {
             token_secret,
             token_ttl,
             session_ttl,
-            nick_lease_ttl,
             signaling_stale_timeout,
             signaling_instances,
         })

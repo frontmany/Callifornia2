@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use message::{
     AuthRequest, AuthResponse, CreateRequest, ErrorResponse, JoinRequest, LogoutRequest,
-    ServerErrorCode, SignalingReadyResponse,
+    ServerErrorCode, SessionRenewRequest, SignalingReadyResponse,
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -89,6 +89,7 @@ async fn main() -> Result<()> {
         .route("/create", post(create))
         .route("/join", post(join))
         .route("/logout", post(logout))
+        .route("/session/renew", post(session_renew))
         .route("/health", get(health))
         .with_state(state);
 
@@ -124,14 +125,9 @@ async fn auth(
     let nickname = payload.nickname.trim().to_owned();
     let session_id = Uuid::new_v4().to_string();
 
-    redis::acquire_nick_lease(
-        &state.redis,
-        &nickname,
-        &session_id,
-        state.config.nick_lease_ttl,
-    )
-    .await
-    .map_err(map_redis_error)?;
+    redis::reserve_nickname(&state.redis, &nickname, &session_id)
+        .await
+        .map_err(map_redis_error)?;
 
     if let Err(err) =
         redis::session_create(&state.redis, &session_id, &nickname, state.config.session_ttl).await
@@ -157,17 +153,6 @@ async fn create(
         .await
         .map_err(map_redis_error)?
         .ok_or(HandlerError::Unauthorized)?;
-    let lease_ok = redis::extend_nick_lease(
-        &state.redis,
-        &session.nickname,
-        &payload.session_id,
-        state.config.nick_lease_ttl,
-    )
-    .await
-    .map_err(map_redis_error)?;
-    if !lease_ok {
-        return Err(HandlerError::Unauthorized.into());
-    }
 
     let signaling = select_least_loaded_signaling(&state).await?;
     let token = issue_signaling_token(
@@ -197,17 +182,6 @@ async fn join(
         .await
         .map_err(map_redis_error)?
         .ok_or(HandlerError::Unauthorized)?;
-    let lease_ok = redis::extend_nick_lease(
-        &state.redis,
-        &session.nickname,
-        &payload.session_id,
-        state.config.nick_lease_ttl,
-    )
-    .await
-    .map_err(map_redis_error)?;
-    if !lease_ok {
-        return Err(HandlerError::Unauthorized.into());
-    }
 
     let route = redis::get_room_route(&state.redis, &payload.room_id)
         .await
@@ -245,6 +219,36 @@ async fn logout(
     if let Some(session) = session {
         let _ = redis::session_delete(&state.redis, &payload.session_id).await;
         let _ = redis::release_nick_lease(&state.redis, &session.nickname, &payload.session_id).await;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn session_renew(
+    AxumState(state): AxumState<State>,
+    Json(payload): Json<SessionRenewRequest>,
+) -> Result<StatusCode, ApiError> {
+    payload
+        .validate()
+        .map_err(|_| HandlerError::InvalidPayload("Invalid session renew request"))?;
+    let session = redis::session_get(&state.redis, &payload.session_id)
+        .await
+        .map_err(map_redis_error)?
+        .ok_or(HandlerError::Unauthorized)?;
+    let owner = redis::nick_owner_get(&state.redis, &session.nickname)
+        .await
+        .map_err(map_redis_error)?;
+    if owner.as_deref() != Some(payload.session_id.as_str()) {
+        return Err(HandlerError::Unauthorized.into());
+    }
+    let ok = redis::session_refresh_ttl(
+        &state.redis,
+        &payload.session_id,
+        state.config.session_ttl,
+    )
+    .await
+    .map_err(map_redis_error)?;
+    if !ok {
+        return Err(HandlerError::Unauthorized.into());
     }
     Ok(StatusCode::NO_CONTENT)
 }

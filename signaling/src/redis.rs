@@ -23,14 +23,6 @@ else
 end
 "#;
 
-const COMPARE_AND_EXPIRE_LUA: &str = r#"
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('EXPIRE', KEYS[1], ARGV[2])
-else
-    return 0
-end
-"#;
-
 #[derive(Debug, Clone)]
 pub struct SessionState {
     pub nickname: String,
@@ -171,25 +163,6 @@ pub async fn release_nick_lease(
             .invoke_async(&mut conn)
             .await?;
         Ok(())
-    })
-    .await
-}
-
-pub async fn renew_nick_lease(
-    client: &Client,
-    nickname: &str,
-    session_id: &str,
-    ttl: Duration,
-) -> Result<bool, RedisRoomError> {
-    with_op_timeout(async move {
-        let mut conn = client.get_connection_manager().await?;
-        let renewed: i64 = redis::Script::new(COMPARE_AND_EXPIRE_LUA)
-            .key(nick_key(nickname))
-            .arg(session_id)
-            .arg(ttl.as_secs().max(1))
-            .invoke_async(&mut conn)
-            .await?;
-        Ok(renewed == 1)
     })
     .await
 }

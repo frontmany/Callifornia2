@@ -1,12 +1,17 @@
 //! Root shell: wires components and document-wide effects (e.g. theme class on `<html>`).
 
 use crate::components::{JoinRoomEntry, MainMenu, NicknameEntry, Room};
-use crate::connector_api::logout_best_effort;
+use crate::connector_api::{logout_best_effort, renew_session};
 use crate::theme::Theme;
+use gloo_timers::callback::Interval;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, UnwrapThrowExt};
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event, HtmlElement};
 use yew::prelude::*;
+
+/// Must stay below connector `SESSION_TTL_SEC` and match signaling `SESSION_RENEW_SEC` order of magnitude.
+const CONNECTOR_SESSION_RENEW_INTERVAL_MS: u32 = 60_000;
 
 #[function_component]
 pub fn App() -> Html {
@@ -25,6 +30,8 @@ pub fn App() -> Html {
     });
     let session_id = use_state(|| Option::<String>::None);
     let handoff_complete = use_state(|| false);
+    // When true, session TTL is refreshed by signaling; stop HTTP renewal on the connector.
+    let signaling_ws_connected = use_state(|| false);
 
     {
         let theme = settings_state.theme;
@@ -51,9 +58,11 @@ pub fn App() -> Html {
         let screen = screen.clone();
         let session_id = session_id.clone();
         let handoff_complete = handoff_complete.clone();
+        let signaling_ws_connected = signaling_ws_connected.clone();
         Callback::from(move |new_session_id: String| {
             session_id.set(Some(new_session_id));
             handoff_complete.set(false);
+            signaling_ws_connected.set(false);
             screen.set(AppScreen::MainMenu);
         })
     };
@@ -124,9 +133,18 @@ pub fn App() -> Html {
     let on_back_to_nickname = {
         let screen = screen.clone();
         let session_id = session_id.clone();
+        let signaling_ws_connected = signaling_ws_connected.clone();
         Callback::from(move |_| {
             session_id.set(None);
+            signaling_ws_connected.set(false);
             screen.set(AppScreen::Nickname);
+        })
+    };
+
+    let on_signaling_ws_connected = {
+        let signaling_ws_connected = signaling_ws_connected.clone();
+        Callback::from(move |connected: bool| {
+            signaling_ws_connected.set(connected);
         })
     };
 
@@ -137,7 +155,12 @@ pub fn App() -> Html {
 
     let on_back_to_main_menu = {
         let screen = screen.clone();
-        Callback::from(move |_| screen.set(AppScreen::MainMenu))
+        let signaling_ws_connected = signaling_ws_connected.clone();
+        Callback::from(move |_| {
+            // Left in-call / room flow; treat as no signaling until WS opens again.
+            signaling_ws_connected.set(false);
+            screen.set(AppScreen::MainMenu);
+        })
     };
 
     let on_handoff_complete = {
@@ -147,6 +170,37 @@ pub fn App() -> Html {
         // SDP/ICE, errors, transfer) to drive in-call UI state.
         Callback::from(move |_| handoff_complete.set(true))
     };
+
+    {
+        let session_id_value = (*session_id).clone();
+        let ws_connected = *signaling_ws_connected;
+        use_effect_with(
+            (session_id_value, ws_connected),
+            move |(session_id, ws_connected)| {
+                let interval_handle =
+                    if let Some(session) = session_id.clone() {
+                        if *ws_connected {
+                            None
+                        } else {
+                            let s0 = session.clone();
+                            spawn_local(async move {
+                                let _ = renew_session(&s0).await;
+                            });
+                            let s_tick = session;
+                            Some(Interval::new(CONNECTOR_SESSION_RENEW_INTERVAL_MS, move || {
+                                let s = s_tick.clone();
+                                spawn_local(async move {
+                                    let _ = renew_session(&s).await;
+                                });
+                            }))
+                        }
+                    } else {
+                        None
+                    };
+                move || drop(interval_handle)
+            },
+        );
+    }
 
     {
         let session_id_value = (*session_id).clone();
@@ -238,6 +292,7 @@ pub fn App() -> Html {
                     on_speaker_device_change={on_speaker_device_change.clone()}
                     on_camera_device_change={on_camera_device_change.clone()}
                     on_end_call={on_back_to_main_menu.clone()}
+                    on_signaling_connected={Some(on_signaling_ws_connected.clone())}
                 />
             },
         }

@@ -22,14 +22,6 @@ else
 end
 "#;
 
-const COMPARE_AND_EXPIRE_LUA: &str = r#"
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('EXPIRE', KEYS[1], ARGV[2])
-else
-    return 0
-end
-"#;
-
 #[derive(Debug, Clone)]
 pub struct RoomRoute {
     pub signaling_instance_id: String,
@@ -94,11 +86,12 @@ pub async fn health_ping(client: &Client) -> Result<(), RedisError> {
     .await
 }
 
-pub async fn acquire_nick_lease(
+/// Reserves `nickname` for `session_id` until [`release_nick_lease`] or logout.
+/// No Redis TTL on the nick key — the client keeps the reservation until explicit release.
+pub async fn reserve_nickname(
     client: &Client,
     nickname: &str,
     session_id: &str,
-    ttl: Duration,
 ) -> Result<(), RedisError> {
     with_op_timeout(async move {
         let mut conn = client.get_connection_manager().await?;
@@ -106,8 +99,6 @@ pub async fn acquire_nick_lease(
             .arg(nick_key(nickname))
             .arg(session_id)
             .arg("NX")
-            .arg("EX")
-            .arg(ttl.as_secs().max(1))
             .query_async(&mut conn)
             .await?;
 
@@ -115,6 +106,16 @@ pub async fn acquire_nick_lease(
             Some("OK") => Ok(()),
             _ => Err(RedisError::NicknameTaken),
         }
+    })
+    .await
+}
+
+/// Current holder of `nickname`, if any (`session_id` string).
+pub async fn nick_owner_get(client: &Client, nickname: &str) -> Result<Option<String>, RedisError> {
+    with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let v: Option<String> = conn.get(nick_key(nickname)).await?;
+        Ok(v)
     })
     .await
 }
@@ -175,21 +176,18 @@ pub async fn session_get(client: &Client, session_id: &str) -> Result<Option<Ses
     .await
 }
 
-pub async fn extend_nick_lease(
+/// Refreshes TTL on the session hash key (slides expiry by full `ttl`).
+pub async fn session_refresh_ttl(
     client: &Client,
-    nickname: &str,
     session_id: &str,
     ttl: Duration,
 ) -> Result<bool, RedisError> {
     with_op_timeout(async move {
         let mut conn = client.get_connection_manager().await?;
-        let updated: i64 = redis::Script::new(COMPARE_AND_EXPIRE_LUA)
-            .key(nick_key(nickname))
-            .arg(session_id)
-            .arg(ttl.as_secs().max(1))
-            .invoke_async(&mut conn)
+        let ok: bool = conn
+            .expire(session_key(session_id), ttl.as_secs() as i64)
             .await?;
-        Ok(updated != 0)
+        Ok(ok)
     })
     .await
 }
