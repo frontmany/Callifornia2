@@ -94,14 +94,13 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
                     <img
                         class="nickname-entry__avatar-logo"
                         src={LOGO_PNG_DATA_URL.as_str()}
-                        width="62"
-                        height="62"
+                        width="44"
+                        height="44"
                         alt=""
                     />
                 </div>
 
-                <h1 class="nickname-entry__title h1">{ "What should we call you?" }</h1>
-                <p class="nickname-entry__subtitle body-md">{ "Enter your nickname to start" }</p>
+                <h1 class="nickname-entry__title h1">{ "Enter your nickname" }</h1>
 
                 <form class="nickname-entry__form" onsubmit={on_submit}>
                     <input
@@ -113,7 +112,10 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
                         placeholder="e.g. Maverick"
                         autocomplete="nickname"
                     />
-                    <p class="nickname-entry__hint body-md">{ "English letters, numbers, underscores, no spaces (3–24 chars)" }</p>
+                    <p class="nickname-entry__hint">
+                        { "English letters, numbers, underscores," }<br />
+                        { "no spaces (3–24 chars)" }
+                    </p>
 
                     if let Some(message) = &*validation_error {
                         <p class="nickname-entry__error body-md" role="alert">{ message }</p>
@@ -124,7 +126,7 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
                             { if *is_submitting { "Connecting..." } else { "Continue" } }
                         </span>
                         <span class="nickname-entry__button-arrow" aria-hidden="true">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M5 12h14" />
                                 <path d="M13 6l6 6-6 6" />
                             </svg>

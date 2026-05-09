@@ -28,7 +28,7 @@ pub(super) fn create_plus_icon() -> Html {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="1.9"
+            stroke-width="2.2"
             stroke-linecap="round"
             stroke-linejoin="round"
         >
@@ -50,9 +50,9 @@ pub(super) fn join_enter_icon() -> Html {
             stroke-linecap="round"
             stroke-linejoin="round"
         >
-            <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
-            <path d="M10 16l4-4-4-4" />
-            <path d="M14 12H4" />
+            <path d="M3 12h8.5" />
+            <path d="M9.5 9 13 12l-3.5 3" />
+            <path d="M15.5 6.5h4v11h-4" />
         </svg>
     }
 }

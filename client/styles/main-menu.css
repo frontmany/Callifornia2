@@ -122,13 +122,13 @@
 }
 
 .main-menu__card-icon--primary {
-    background: var(--color-primary);
-    color: #ffffff;
+    background: var(--avatar-bg);
+    color: var(--color-primary);
 }
 
 .main-menu__card-icon--secondary {
-    background: color-mix(in srgb, var(--text-muted) 18%, white);
-    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 10%, white);
+    color: var(--text-primary);
 }
 
 .main-menu__card-svg {

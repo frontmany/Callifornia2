@@ -100,7 +100,7 @@ pub fn JoinRoomEntry(props: &JoinRoomEntryProps) -> Html {
     }
 
     html! {
-        <div class="join-room-entry font-manrope text-on-background">
+        <div class="join-room-entry-page">
             <div class="join-room-entry__actions join-room-entry__actions--floating">
                 <button
                     type="button"
@@ -125,48 +125,58 @@ pub fn JoinRoomEntry(props: &JoinRoomEntryProps) -> Html {
                 </button>
             </div>
 
-            <main class="join-room-entry__content">
-            <section class="join-room-entry__card" aria-label="Join room card">
-                <div class="join-room-entry__avatar" aria-hidden="true">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 0 1 7 7l-1 1" />
-                        <path d="M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 0 1-7-7l1-1" />
-                    </svg>
-                </div>
+            <main class="join-room-entry font-manrope text-on-background">
+                <section class="join-room-entry__card" aria-label="Join room card">
+                    <div class="join-room-entry__avatar" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 0 1 7 7l-1 1" />
+                            <path d="M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 0 1-7-7l1-1" />
+                        </svg>
+                    </div>
 
-                <h1 class="join-room-entry__title h1">{ "Join Room" }</h1>
-                <p class="join-room-entry__subtitle body-md">{ "Enter your room ID to connect in seconds." }</p>
+                    <h1 class="join-room-entry__title h1">{ "Join a room" }</h1>
 
-                <form ref={form_ref} class="join-room-entry__form" onsubmit={on_submit}>
-                    <input
-                        id="join-room-input"
-                        class={input_classes}
-                        type="text"
-                        value={(*room_target).clone()}
-                        oninput={on_input}
-                        onkeydown={on_input_keydown}
-                        placeholder="e.g. 33fa5b65"
-                        autocomplete="off"
-                    />
-                    <p class="join-room-entry__hint body-md">{ "Room ID only. Use the code shared by the room host" }</p>
+                    <form ref={form_ref} class="join-room-entry__form" onsubmit={on_submit}>
+                        <input
+                            id="join-room-input"
+                            class={input_classes}
+                            type="text"
+                            value={(*room_target).clone()}
+                            oninput={on_input}
+                            onkeydown={on_input_keydown}
+                            placeholder="e.g. 33fa5b65"
+                            autocomplete="off"
+                        />
+                        <p class="join-room-entry__hint">
+                            { "Paste the room ID from your host," }<br />
+                            { "letters and numbers only" }
+                        </p>
 
-                    if let Some(message) = &*validation_error {
-                        <p class="join-room-entry__error body-md" role="alert">{ message }</p>
-                    }
+                        if let Some(message) = &*validation_error {
+                            <p class="join-room-entry__error body-md" role="alert">{ message }</p>
+                        }
 
-                    <button class="join-room-entry__button" type="submit">
-                        { "Join Room" }
-                    </button>
+                        <button class="join-room-entry__button" type="submit">
+                            <span class="join-room-entry__button-label">
+                                { "Join room" }
+                            </span>
+                            <span class="join-room-entry__button-arrow" aria-hidden="true">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M5 12h14" />
+                                    <path d="M13 6l6 6-6 6" />
+                                </svg>
+                            </span>
+                        </button>
 
-                    <button
-                        type="button"
-                        class="join-room-entry__back body-md"
-                        onclick={props.on_back.reform(|_| ())}
-                    >
-                        { "Back" }
-                    </button>
-                </form>
-            </section>
+                        <button
+                            type="button"
+                            class="join-room-entry__back"
+                            onclick={props.on_back.reform(|_| ())}
+                        >
+                            { "Back" }
+                        </button>
+                    </form>
+                </section>
             </main>
 
             if *is_settings_open {
