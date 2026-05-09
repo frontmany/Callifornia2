@@ -1,0 +1,282 @@
+/* Screen-share picker modal (custom UI before getDisplayMedia). */
+
+.screen-share-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 130;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(20px, 5vw, 48px);
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+.screen-share-dialog__backdrop {
+    position: fixed;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: #d8dee8;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+html.dark .screen-share-dialog__backdrop {
+    background: #182230;
+}
+
+.screen-share-dialog__panel {
+    position: relative;
+    z-index: 1;
+    width: min(100%, 960px);
+    max-height: min(90vh, 760px);
+    display: flex;
+    flex-direction: column;
+    padding: clamp(28px, 4vw, 40px) clamp(28px, 4vw, 44px);
+    border-radius: var(--radius-card);
+    border: 1px solid #d5dbe8;
+    background: #f8fafc;
+    box-shadow: var(--shadow-card);
+    pointer-events: auto;
+    box-sizing: border-box;
+}
+
+html.dark .screen-share-dialog__panel {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: #141c28;
+}
+
+.screen-share-dialog__title {
+    margin: 0 0 18px;
+    font-size: clamp(1.1rem, 2.2vw, 1.3rem);
+    font-weight: 700;
+    color: var(--text-primary);
+    text-align: center;
+    letter-spacing: -0.02em;
+}
+
+.screen-share-dialog__status {
+    margin: 0 0 28px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-align: center;
+    min-height: 1.4em;
+}
+
+.screen-share-dialog__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 4px 12px;
+    scrollbar-gutter: stable;
+}
+
+.screen-share-dialog__scroll::-webkit-scrollbar {
+    width: 8px;
+}
+
+.screen-share-dialog__scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 38%, transparent);
+}
+
+/* Centered row(s) of tiles; flex works better than grid when counts vary. */
+.screen-share-dialog__grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-start;
+    gap: clamp(22px, 3.5vw, 32px);
+    padding: 12px 8px 20px;
+}
+
+.screen-share-dialog__empty {
+    padding: 48px 24px;
+    text-align: center;
+    font-size: 15px;
+    color: var(--hint);
+}
+
+.screen-share-dialog__tile {
+    width: 100%;
+    max-width: 300px;
+    flex: 0 0 auto;
+    border: 1px solid #d5dbe8;
+    border-radius: 16px;
+    padding: 16px 16px 18px;
+    background: #eef2fa;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    box-sizing: border-box;
+    transition:
+        border-color 0.15s ease,
+        box-shadow 0.15s ease,
+        background-color 0.15s ease;
+}
+
+html.dark .screen-share-dialog__tile {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: #1e2736;
+}
+
+.screen-share-dialog__tile:hover {
+    border-color: color-mix(in srgb, var(--color-primary) 50%, #d5dbe8);
+}
+
+.screen-share-dialog__tile:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
+}
+
+.screen-share-dialog__tile--selected {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--focus-glow);
+    background: #e8f1fd;
+}
+
+html.dark .screen-share-dialog__tile--selected {
+    background: color-mix(in srgb, var(--color-primary) 16%, #1e2736);
+}
+
+/* Centers previews of any aspect ratio inside the tile. */
+.screen-share-dialog__thumb-wrap {
+    width: 100%;
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.screen-share-dialog__thumb {
+    position: relative;
+    margin-inline: auto;
+    border-radius: 12px;
+    overflow: hidden;
+    background: linear-gradient(
+        145deg,
+        #dde4f0,
+        color-mix(in srgb, var(--color-primary) 12%, #e8ecf4)
+    );
+    box-sizing: border-box;
+}
+
+html.dark .screen-share-dialog__thumb {
+    background: linear-gradient(
+        145deg,
+        #252f42,
+        color-mix(in srgb, var(--color-primary) 18%, #1a2434)
+    );
+}
+
+.screen-share-dialog__thumb-inner {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, transparent 45%),
+        repeating-linear-gradient(
+            -12deg,
+            transparent,
+            transparent 8px,
+            rgba(24, 28, 34, 0.06) 8px,
+            rgba(24, 28, 34, 0.06) 9px
+        );
+}
+
+html.dark .screen-share-dialog__thumb-inner {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 45%),
+        repeating-linear-gradient(
+            -12deg,
+            transparent,
+            transparent 8px,
+            rgba(255, 255, 255, 0.05) 8px,
+            rgba(255, 255, 255, 0.05) 9px
+        );
+}
+
+.screen-share-dialog__tile-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.4;
+    text-align: center;
+    word-break: break-word;
+    width: 100%;
+}
+
+.screen-share-dialog__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid #e2e8f0;
+}
+
+html.dark .screen-share-dialog__actions {
+    border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.screen-share-dialog__btn {
+    min-height: 46px;
+    padding: 12px 26px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    border: 0;
+    transition:
+        background-color 0.15s ease,
+        color 0.15s ease,
+        opacity 0.15s ease;
+}
+
+.screen-share-dialog__btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.screen-share-dialog__btn--primary {
+    min-width: 200px;
+    background: var(--color-primary);
+    color: #fff;
+}
+
+.screen-share-dialog__btn--primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+}
+
+.screen-share-dialog__btn--ghost {
+    min-width: 120px;
+    background: #e8eaef;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.screen-share-dialog__btn--ghost:hover {
+    background: #dde1e8;
+    color: var(--text-primary);
+}
+
+html.dark .screen-share-dialog__btn--ghost {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+}
+
+html.dark .screen-share-dialog__btn--ghost:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-primary);
+}
+
+html.dark .screen-share-dialog__btn--primary {
+    color: #f8fafc;
+}

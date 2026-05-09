@@ -122,8 +122,8 @@
 }
 
 .main-menu__card-icon--primary {
-    background: var(--avatar-bg);
-    color: var(--color-primary);
+    background: var(--color-primary);
+    color: #ffffff;
 }
 
 .main-menu__card-icon--secondary {

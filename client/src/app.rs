@@ -1,6 +1,6 @@
 //! Root shell: wires components and document-wide effects (e.g. theme class on `<html>`).
 
-use crate::components::{JoinRoomEntry, MainMenu, NicknameEntry};
+use crate::components::{JoinRoomEntry, MainMenu, NicknameEntry, Room};
 use crate::connector_api::logout_best_effort;
 use crate::theme::Theme;
 use wasm_bindgen::closure::Closure;
@@ -14,7 +14,15 @@ pub fn App() -> Html {
         theme: initial_theme_from_system(),
         ..SettingsState::default()
     });
-    let screen = use_state(|| AppScreen::Nickname);
+    // DEV_ROOM_PREVIEW: set to `false` to restore normal flow (nickname → menu → join).
+    const DEV_FORCE_ROOM_VIEW: bool = true;
+    let screen = use_state(|| {
+        if DEV_FORCE_ROOM_VIEW {
+            AppScreen::Room
+        } else {
+            AppScreen::Nickname
+        }
+    });
     let session_id = use_state(|| Option::<String>::None);
     let handoff_complete = use_state(|| false);
 
@@ -218,6 +226,20 @@ pub fn App() -> Html {
                     on_camera_device_change={on_camera_device_change}
                 />
             },
+            AppScreen::Room => html! {
+                <Room
+                    settings_state={*settings_state}
+                    on_theme_change={on_theme.clone()}
+                    on_toggle_mic={on_toggle_mic.clone()}
+                    on_toggle_camera={on_toggle_camera.clone()}
+                    on_input_level_change={on_input_level_change.clone()}
+                    on_output_level_change={on_output_level_change.clone()}
+                    on_mic_device_change={on_mic_device_change.clone()}
+                    on_speaker_device_change={on_speaker_device_change.clone()}
+                    on_camera_device_change={on_camera_device_change.clone()}
+                    on_end_call={on_back_to_main_menu.clone()}
+                />
+            },
         }
     }
 }
@@ -227,6 +249,7 @@ enum AppScreen {
     Nickname,
     MainMenu,
     JoinRoom,
+    Room,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
