@@ -69,7 +69,7 @@ html.dark {
     --card-bg: rgba(24, 30, 41, 0.58);
     --card-border: rgba(255, 255, 255, 0.12);
 
-    --avatar-bg: rgba(91, 160, 255, 0.18);
+    --avatar-bg: rgba(39, 120, 246, 0.18);
 
     --input-bg: rgba(255, 255, 255, 0.06);
     --input-border: rgba(255, 255, 255, 0.14);
@@ -79,16 +79,16 @@ html.dark {
     --error-text: rgba(255, 168, 168, 0.9);
     --error-text-soft: rgba(255, 168, 168, 0.8);
 
-    --focus-ring: rgba(91, 160, 255, 0.35);
-    --focus-glow: rgba(91, 160, 255, 0.16);
+    --focus-ring: rgba(39, 120, 246, 0.38);
+    --focus-glow: rgba(39, 120, 246, 0.18);
 
     --error-ring: rgba(255, 120, 120, 0.28);
     --error-glow: rgba(255, 80, 80, 0.12);
     --error-ring-strong: rgba(255, 134, 134, 0.34);
     --error-glow-strong: rgba(255, 80, 80, 0.16);
 
-    --color-primary: #5ba0ff;
-    --color-primary-hover: #7ab2ff;
+    --color-primary: #2778f6;
+    --color-primary-hover: #4f93ff;
 
     --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.45);
 
