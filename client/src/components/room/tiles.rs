@@ -16,22 +16,6 @@ pub fn truncate_str(s: &str, max: usize) -> String {
     out
 }
 
-/// Renders a single participant tile.
-///
-/// `rail` adds `.room-page__tile--rail` for the compact presentation-mode style.
-pub fn participant_tile(name: &str, tile_w: f64, tile_h: f64, rail: bool) -> Html {
-    let label = truncate_str(name, MAX_NAME_CHARS);
-    let style = format!("width:{tile_w:.1}px;height:{tile_h:.1}px;flex:0 0 auto;");
-    html! {
-        <div
-            class={classes!("room-page__tile", rail.then_some("room-page__tile--rail"))}
-            style={style}
-        >
-            <span class="room-page__tile-name" title={name.to_owned()}>{ label }</span>
-        </div>
-    }
-}
-
 /// Renders the SVG chevron used inside a paging arrow button.
 ///
 /// `left = true` → left-pointing (previous); `false` → right-pointing (next).

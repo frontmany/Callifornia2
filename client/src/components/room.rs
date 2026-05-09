@@ -2,6 +2,8 @@
 
 #[path = "room/layout.rs"]
 mod layout;
+#[path = "room/participant_tile.rs"]
+pub mod participant_tile;
 #[path = "room/tiles.rs"]
 mod tiles;
 
@@ -13,9 +15,10 @@ use layout::{
     ParticipantLayout, TILE_ASPECT_W_OVER_H, TILE_GAP_PX,
     resolve_participant_layout, tiles_wrap_content_wh,
 };
-use tiles::{page_arrow_chevron, participant_tile, truncate_str};
+use participant_tile::ParticipantTile;
+use tiles::{page_arrow_chevron, truncate_str};
 use wasm_bindgen::closure::Closure;
-use wasm_bindgen::{JsCast, UnwrapThrowExt};
+use wasm_bindgen::{JsCast, JsValue, UnwrapThrowExt};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::window;
 use yew::prelude::*;
@@ -62,6 +65,10 @@ pub struct RoomProps {
     /// screen-share layout as a local presentation.
     #[prop_or_default]
     pub remote_presentation_active: bool,
+    /// Optional camera/preview stream per participant index (same order as your participant list).
+    /// Pass each [`web_sys::MediaStream`] as [`JsValue`] (see [`media_stream_js`]).
+    #[prop_or_default]
+    pub participant_media: Vec<Option<JsValue>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +374,8 @@ pub fn Room(props: &RoomProps) -> Html {
                         { view_presentation(
                             stage_caption,
                             &MOCK_PARTICIPANTS[start..end],
+                            start,
+                            props.participant_media.as_slice(),
                             rail_cluster_style,
                             rail_tile_h,
                             show_arrows,
@@ -378,6 +387,8 @@ pub fn Room(props: &RoomProps) -> Html {
                     } else {
                         { view_tiles(
                             &MOCK_PARTICIPANTS[start..end],
+                            start,
+                            props.participant_media.as_slice(),
                             &layout,
                             tiles_cluster_style,
                             show_arrows,
@@ -533,6 +544,8 @@ pub fn Room(props: &RoomProps) -> Html {
 #[allow(clippy::too_many_arguments)]
 fn view_tiles(
     participants: &[&str],
+    range_start: usize,
+    participant_media: &[Option<JsValue>],
     layout: &ParticipantLayout,
     cluster_style: String,
     show_arrows: bool,
@@ -556,8 +569,18 @@ fn view_tiles(
                 }
                 <div class="room-page__tiles-viewport">
                     <div class="room-page__tiles" style={cluster_style}>
-                        { for participants.iter().map(|&name| {
-                            participant_tile(name, layout.tile_width, layout.tile_height, false)
+                        { for participants.iter().enumerate().map(|(i, &name)| {
+                            let global_i = range_start + i;
+                            let media = participant_media.get(global_i).cloned().flatten();
+                            html! {
+                                <ParticipantTile
+                                    name={name.to_string()}
+                                    media={media}
+                                    width_px={layout.tile_width}
+                                    height_px={layout.tile_height}
+                                    rail={false}
+                                />
+                            }
                         }) }
                     </div>
                 </div>
@@ -582,6 +605,8 @@ fn view_tiles(
 fn view_presentation(
     stage_caption: &str,
     participants: &[&str],
+    range_start: usize,
+    participant_media: &[Option<JsValue>],
     rail_cluster_style: String,
     rail_tile_h: f64,
     show_arrows: bool,
@@ -620,8 +645,18 @@ fn view_presentation(
                             class="room-page__participants-rail-tiles"
                             style={rail_cluster_style}
                         >
-                            { for participants.iter().map(|&name| {
-                                participant_tile(name, RAIL_TILE_W_PX, rail_tile_h, true)
+                            { for participants.iter().enumerate().map(|(i, &name)| {
+                                let global_i = range_start + i;
+                                let media = participant_media.get(global_i).cloned().flatten();
+                                html! {
+                                    <ParticipantTile
+                                        name={name.to_string()}
+                                        media={media}
+                                        width_px={RAIL_TILE_W_PX}
+                                        height_px={rail_tile_h}
+                                        rail={true}
+                                    />
+                                }
                             }) }
                         </div>
                     </div>
