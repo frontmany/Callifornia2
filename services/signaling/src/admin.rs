@@ -24,10 +24,7 @@ impl AdminService {
 
 #[tonic::async_trait]
 impl SignalingAdminService for AdminService {
-    async fn ping(
-        &self,
-        _request: Request<PingRequest>,
-    ) -> Result<Response<PingResponse>, Status> {
+    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         let active_peers = self.state.peers.peer_count().await;
         let active_sessions = self.state.sessions.count().await;
         let node_id = self.state.config.public_node_id();
@@ -46,10 +43,7 @@ impl SignalingAdminService for AdminService {
         let reason = request.into_inner().reason;
         info!(reason = %reason, "admin Purge requested");
 
-        let degradation = match reason.as_str() {
-            "redis" => DegradationReason::RedisDown,
-            _ => DegradationReason::RoomManagerDown,
-        };
+        let degradation = DegradationReason::RedisDown;
 
         let rooms_snapshot = self.state.peers.snapshot_rooms().await;
         let rooms_closed = rooms_snapshot.len() as u32;

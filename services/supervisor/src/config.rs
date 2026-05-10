@@ -12,17 +12,24 @@ pub struct SignalingAdminInstance {
 }
 
 #[derive(Debug, Clone)]
+pub struct SfuInventoryInstance {
+    pub instance_id: String,
+    pub grpc_addr: String,
+    pub max_rooms: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub redis_url: String,
     pub redis_connect_timeout: Duration,
     pub redis_op_timeout: Duration,
 
-    pub room_manager_grpc_addr: String,
     pub rpc_connect_timeout: Duration,
-    pub rpc_timeout: Duration,
 
     /// List of signaling admin endpoints to probe.
     pub signaling_admin_instances: Vec<SignalingAdminInstance>,
+    /// List of SFU endpoints to seed into Redis and probe.
+    pub sfu_instances: Vec<SfuInventoryInstance>,
 
     /// How often each probe loop ticks.
     pub probe_interval: Duration,
@@ -34,12 +41,6 @@ pub struct Config {
 
     /// Janitor / reconciliation interval.
     pub janitor_interval: Duration,
-
-    /// SFU provisioning timeout before reclaiming the slot.
-    pub sfu_provisioning_timeout: Duration,
-
-    /// Idle time before scale-down of a provisioned SFU with no rooms.
-    pub scale_down_idle_timeout: Duration,
 
     /// Timeout for individual SFU Ping RPCs.
     pub sfu_connect_timeout: Duration,
@@ -54,27 +55,18 @@ impl Config {
             redis_url: env_or("REDIS_URL", "redis://redis:6379/"),
             redis_connect_timeout: ms_env_or("REDIS_CONNECT_TIMEOUT_MS", 2_000)?,
             redis_op_timeout: ms_env_or("REDIS_OP_TIMEOUT_MS", 800)?,
-            room_manager_grpc_addr: env_or(
-                "ROOM_MANAGER_GRPC_ADDR",
-                "http://room-manager:50061",
-            ),
             rpc_connect_timeout: ms_env_or("RPC_CONNECT_TIMEOUT_MS", 2_000)?,
-            rpc_timeout: ms_env_or("RPC_TIMEOUT_MS", 3_000)?,
             signaling_admin_instances: parse_signaling_admin_instances(&env_or(
                 "SIGNALING_ADMIN_INSTANCES",
                 "",
             ))?,
+            sfu_instances: parse_sfu_instances(&env_or("SUPERVISOR_SFU_INSTANCES", ""))?,
             probe_interval: ms_env_or("SUPERVISOR_PROBE_INTERVAL_MS", 2_000)?,
             probe_timeout: ms_env_or("SUPERVISOR_PROBE_TIMEOUT_MS", 1_000)?,
             signaling_stale_timeout: secs_env_or("SIGNALING_STALE_SEC", 30)?,
             janitor_interval: secs_env_or("JANITOR_INTERVAL_SEC", 5)?,
-            sfu_provisioning_timeout: secs_env_or("SFU_PROVISIONING_TIMEOUT_SEC", 60)?,
-            scale_down_idle_timeout: ms_env_or("ROOM_MANAGER_SCALE_DOWN_IDLE_MS", 300_000)?,
             sfu_connect_timeout: ms_env_or("SFU_CONNECT_TIMEOUT_MS", 2_000)?,
-            instance_id: env_or(
-                "SUPERVISOR_INSTANCE_ID",
-                &uuid::Uuid::new_v4().to_string(),
-            ),
+            instance_id: env_or("SUPERVISOR_INSTANCE_ID", &uuid::Uuid::new_v4().to_string()),
         })
     }
 }
@@ -95,6 +87,39 @@ fn parse_signaling_admin_instances(value: &str) -> Result<Vec<SignalingAdminInst
             Ok(SignalingAdminInstance {
                 node_id: node_id.trim().to_owned(),
                 grpc_addr: grpc_addr.trim().to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// Format: "instance_id|grpc_addr|max_rooms;instance_id|grpc_addr|max_rooms;..."
+/// Example: "sfu-1|http://127.0.0.1:50051|200"
+fn parse_sfu_instances(value: &str) -> Result<Vec<SfuInventoryInstance>> {
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    value
+        .split(';')
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| {
+            let mut parts = entry.split('|');
+            let instance_id = parts
+                .next()
+                .filter(|value| !value.is_empty())
+                .context("SUPERVISOR_SFU_INSTANCES entry requires instance_id")?;
+            let grpc_addr = parts
+                .next()
+                .filter(|value| !value.is_empty())
+                .context("SUPERVISOR_SFU_INSTANCES entry requires grpc_addr")?;
+            let max_rooms = parts
+                .next()
+                .context("SUPERVISOR_SFU_INSTANCES entry requires max_rooms")?
+                .parse()
+                .context("SUPERVISOR_SFU_INSTANCES max_rooms must be integer")?;
+            Ok(SfuInventoryInstance {
+                instance_id: instance_id.trim().to_owned(),
+                grpc_addr: grpc_addr.trim().to_owned(),
+                max_rooms,
             })
         })
         .collect()

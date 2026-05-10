@@ -75,17 +75,10 @@ impl SessionStore {
         for session_id in session_ids {
             if let Some(session) = self.by_session_id.get_mut(&session_id) {
                 session.room_id = None;
-                session.pending_room_id = None;
                 affected.push(session_id);
             }
         }
         affected
-    }
-
-    fn set_pending_room(&mut self, session_id: &str, room_id: Option<String>) {
-        if let Some(session) = self.by_session_id.get_mut(session_id) {
-            session.pending_room_id = room_id;
-        }
     }
 
     fn remove_room_link(&mut self, session_id: &str, room_id: &str) {
@@ -121,13 +114,6 @@ impl SessionRegistry {
 
     pub async fn set_room(&self, session_id: &str, room_id: Option<String>) {
         self.inner.write().await.set_room(session_id, room_id);
-    }
-
-    pub async fn set_pending_room(&self, session_id: &str, room_id: Option<String>) {
-        self.inner
-            .write()
-            .await
-            .set_pending_room(session_id, room_id);
     }
 
     pub async fn clear_room(&self, room_id: &str) -> Vec<String> {

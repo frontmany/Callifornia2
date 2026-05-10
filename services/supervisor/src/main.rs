@@ -1,18 +1,19 @@
 mod config;
-mod proto;
 mod probes;
+mod proto;
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use control_store::models::SfuCandidate;
 use control_store::storage::{self, health_ping, unix_now};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
 use crate::probes::{
-    heartbeat_loop, janitor_loop, purge_all_signaling_for_redis_down,
-    room_manager_probe_loop, sfu_probe_loop, signaling_probe_loop,
+    heartbeat_loop, janitor_loop, purge_all_signaling_for_redis_down, sfu_probe_loop,
+    signaling_probe_loop,
 };
 
 #[tokio::main]
@@ -23,12 +24,12 @@ async fn main() -> Result<()> {
     let config = Arc::new(Config::from_env().context("load supervisor config")?);
     storage::set_op_timeout(config.redis_op_timeout);
 
-    let redis = redis::Client::open(config.redis_url.as_str())
-        .context("create redis client")?;
+    let redis = redis::Client::open(config.redis_url.as_str()).context("create redis client")?;
 
     // Wait for Redis to be reachable.
-    let connect_deadline =
-        std::time::Instant::now() + config.redis_connect_timeout + std::time::Duration::from_secs(5);
+    let connect_deadline = std::time::Instant::now()
+        + config.redis_connect_timeout
+        + std::time::Duration::from_secs(5);
     loop {
         if health_ping(&redis).await.is_ok() {
             info!("Redis is reachable");
@@ -48,6 +49,19 @@ async fn main() -> Result<()> {
         warn!(error = %err, "failed to write initial supervisor heartbeat");
     }
 
+    let sfu_inventory: Vec<SfuCandidate> = config
+        .sfu_instances
+        .iter()
+        .map(|instance| SfuCandidate {
+            instance_id: instance.instance_id.clone(),
+            grpc_addr: instance.grpc_addr.clone(),
+            max_rooms: instance.max_rooms,
+        })
+        .collect();
+    storage::seed_sfu_inventory(&redis, &sfu_inventory)
+        .await
+        .context("seed SFU inventory")?;
+
     info!(instance_id = %config.instance_id, "Supervisor started");
 
     // Spawn background tasks.
@@ -63,12 +77,6 @@ async fn main() -> Result<()> {
     let sig_redis = redis.clone();
     tokio::spawn(async move {
         signaling_probe_loop(sig_config, sig_redis).await;
-    });
-
-    let rm_config = config.clone();
-    let rm_redis = redis.clone();
-    tokio::spawn(async move {
-        room_manager_probe_loop(rm_config, rm_redis).await;
     });
 
     let sfu_config = config.clone();
@@ -107,8 +115,7 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing() {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)

@@ -7,7 +7,7 @@ use redis::AsyncCommands;
 use tokio::time::timeout;
 
 use crate::keys::*;
-use crate::models::{RoomBinding, SfuInstance, SupervisorStatus, WaitingRequestRecord};
+use crate::models::{RoomBinding, SfuCandidate, SfuInstance, SupervisorStatus};
 
 static OP_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
@@ -58,8 +58,7 @@ pub async fn write_supervisor_heartbeat(
 pub async fn read_supervisor_status(redis: &redis::Client) -> Result<Option<SupervisorStatus>> {
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
-        let values: HashMap<String, String> =
-            conn.hgetall(SUPERVISOR_HEARTBEAT_KEY).await?;
+        let values: HashMap<String, String> = conn.hgetall(SUPERVISOR_HEARTBEAT_KEY).await?;
         if values.is_empty() {
             return Ok(None);
         }
@@ -67,10 +66,7 @@ pub async fn read_supervisor_status(redis: &redis::Client) -> Result<Option<Supe
             .get("last_seen_unix")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
-        let instance_id = values
-            .get("instance_id")
-            .filter(|v| !v.is_empty())
-            .cloned();
+        let instance_id = values.get("instance_id").filter(|v| !v.is_empty()).cloned();
         Ok(Some(SupervisorStatus {
             last_seen_unix,
             instance_id,
@@ -143,9 +139,7 @@ pub async fn remove_signaling_node_heartbeats_below(
 pub async fn signaling_load_members(redis: &redis::Client) -> Result<Vec<String>> {
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
-        let entries: Vec<String> = conn
-            .zrange(SIGNALING_INSTANCE_LOAD_KEY, 0, -1)
-            .await?;
+        let entries: Vec<String> = conn.zrange(SIGNALING_INSTANCE_LOAD_KEY, 0, -1).await?;
         Ok(entries)
     })
     .await
@@ -194,10 +188,7 @@ pub async fn scan_signaling_session_ids(redis: &redis::Client) -> Result<Vec<Str
     .await
 }
 
-pub async fn get_session_owner(
-    redis: &redis::Client,
-    session_id: &str,
-) -> Result<Option<String>> {
+pub async fn get_session_owner(redis: &redis::Client, session_id: &str) -> Result<Option<String>> {
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
         let owner: Option<String> = conn
@@ -333,8 +324,7 @@ pub async fn get_room_assignment(
 ) -> Result<Option<RoomBinding>> {
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
-        let values: HashMap<String, String> =
-            conn.hgetall(room_binding_key(room_id)).await?;
+        let values: HashMap<String, String> = conn.hgetall(room_binding_key(room_id)).await?;
         if values.is_empty() {
             return Ok(None);
         }
@@ -354,7 +344,7 @@ pub async fn get_room_assignment(
             state: values
                 .get("room_state")
                 .cloned()
-                .unwrap_or_else(|| "allocating".to_owned()),
+                .unwrap_or_else(|| "active".to_owned()),
             sfu_instance_id: values
                 .get("sfu_instance_id")
                 .cloned()
@@ -382,7 +372,7 @@ pub async fn delete_room_assignment(redis: &redis::Client, room_id: &str) -> Res
     .await
 }
 
-/// Update session room field to None (used during cleanup when room_manager may be down).
+/// Update session room field to None during cleanup.
 pub async fn session_clear_room(redis: &redis::Client, session_id: &str) -> Result<()> {
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
@@ -406,13 +396,10 @@ pub async fn list_sfu_instances(redis: &redis::Client) -> Result<Vec<SfuInstance
     .await
 }
 
-pub async fn load_sfu_room_loads(
-    redis: &redis::Client,
-) -> Result<HashMap<String, f64>> {
+pub async fn load_sfu_room_loads(redis: &redis::Client) -> Result<HashMap<String, f64>> {
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
-        let entries: Vec<(String, f64)> =
-            conn.zrange_withscores(SFU_ROOM_LOAD_KEY, 0, -1).await?;
+        let entries: Vec<(String, f64)> = conn.zrange_withscores(SFU_ROOM_LOAD_KEY, 0, -1).await?;
         Ok(entries.into_iter().collect())
     })
     .await
@@ -439,6 +426,48 @@ pub async fn save_sfu_instance(redis: &redis::Client, instance: &SfuInstance) ->
         let _: usize = conn
             .hset(SFU_INSTANCES_KEY, &instance.instance_id, payload)
             .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn seed_sfu_inventory(redis: &redis::Client, inventory: &[SfuCandidate]) -> Result<()> {
+    let now = unix_now();
+    with_timeout(async move {
+        let mut conn = redis.get_connection_manager().await?;
+        for candidate in inventory {
+            let existing: Option<String> =
+                conn.hget(SFU_INSTANCES_KEY, &candidate.instance_id).await?;
+            let instance = match existing {
+                Some(payload) => {
+                    let mut instance: SfuInstance = serde_json::from_str(&payload)?;
+                    instance.grpc_addr = candidate.grpc_addr.clone();
+                    instance.max_rooms = candidate.max_rooms;
+                    instance
+                }
+                None => SfuInstance {
+                    instance_id: candidate.instance_id.clone(),
+                    grpc_addr: candidate.grpc_addr.clone(),
+                    max_rooms: candidate.max_rooms,
+                    alive: false,
+                    state: "unknown".to_owned(),
+                    last_ping_unix: 0,
+                    idle_since_unix: now,
+                },
+            };
+            let payload = serde_json::to_string(&instance)?;
+            let _: usize = conn
+                .hset(SFU_INSTANCES_KEY, &instance.instance_id, payload)
+                .await?;
+            let existing_load: Option<f64> = conn
+                .zscore(SFU_ROOM_LOAD_KEY, &instance.instance_id)
+                .await?;
+            if existing_load.is_none() {
+                let _: usize = conn
+                    .zadd(SFU_ROOM_LOAD_KEY, &instance.instance_id, 0)
+                    .await?;
+            }
+        }
         Ok(())
     })
     .await
@@ -489,10 +518,7 @@ pub async fn delete_sfu_instance(redis: &redis::Client, instance_id: &str) -> Re
     .await
 }
 
-pub async fn decrement_sfu_room_load(
-    redis: &redis::Client,
-    instance_id: &str,
-) -> Result<()> {
+pub async fn decrement_sfu_room_load(redis: &redis::Client, instance_id: &str) -> Result<()> {
     let next = with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
         let current: Option<f64> = conn.zscore(SFU_ROOM_LOAD_KEY, instance_id).await?;
@@ -508,33 +534,7 @@ pub async fn decrement_sfu_room_load(
     Ok(())
 }
 
-// ── Waiting request queue ─────────────────────────────────────────────────────
-
-pub async fn waiting_request_count(redis: &redis::Client) -> Result<usize> {
-    with_timeout(async move {
-        let mut conn = redis.get_connection_manager().await?;
-        let len: usize = conn.llen(WAITING_REQUESTS_KEY).await?;
-        Ok(len)
-    })
-    .await
-}
-
-pub async fn pop_waiting_request(
-    redis: &redis::Client,
-) -> Result<Option<WaitingRequestRecord>> {
-    with_timeout(async move {
-        let mut conn = redis.get_connection_manager().await?;
-        let payload: Option<String> = conn.lpop(WAITING_REQUESTS_KEY, None).await?;
-        payload
-            .map(|json| serde_json::from_str(&json).map_err(anyhow::Error::from))
-            .transpose()
-    })
-    .await
-}
-
-pub async fn select_least_loaded_instance(
-    redis: &redis::Client,
-) -> Result<Option<SfuInstance>> {
+pub async fn select_least_loaded_instance(redis: &redis::Client) -> Result<Option<SfuInstance>> {
     let instances = list_sfu_instances(redis).await?;
     let room_loads = load_sfu_room_loads(redis).await?;
     let now = unix_now();
@@ -589,7 +589,9 @@ pub async fn assign_room_to_instance(
     // Increment room load
     with_timeout(async move {
         let mut conn = redis.get_connection_manager().await?;
-        let _: f64 = conn.zincr(SFU_ROOM_LOAD_KEY, &instance.instance_id, 1).await?;
+        let _: f64 = conn
+            .zincr(SFU_ROOM_LOAD_KEY, &instance.instance_id, 1)
+            .await?;
         Ok(())
     })
     .await?;

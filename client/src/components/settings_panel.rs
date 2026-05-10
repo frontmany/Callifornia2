@@ -5,7 +5,8 @@ mod data;
 
 use crate::components::ThemeToggle;
 use crate::theme::Theme;
-use data::{DeviceEntry, DeviceKind, stub_device_catalog};
+use data::{DeviceCatalog, DeviceEntry, DeviceKind, load_device_catalog};
+use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
@@ -26,36 +27,54 @@ pub struct SettingsPanelProps {
     pub on_toggle_camera: Callback<()>,
     pub on_input_level_change: Callback<u32>,
     pub on_output_level_change: Callback<u32>,
-    pub selected_mic_device_id: &'static str,
-    pub selected_speaker_device_id: &'static str,
-    pub selected_camera_device_id: &'static str,
-    pub on_mic_device_change: Callback<&'static str>,
-    pub on_speaker_device_change: Callback<&'static str>,
-    pub on_camera_device_change: Callback<&'static str>,
+    pub selected_mic_device_id: String,
+    pub selected_speaker_device_id: String,
+    pub selected_camera_device_id: String,
+    pub on_mic_device_change: Callback<String>,
+    pub on_speaker_device_change: Callback<String>,
+    pub on_camera_device_change: Callback<String>,
 }
 
 #[function_component]
 pub fn SettingsPanel(props: &SettingsPanelProps) -> Html {
     let tab = use_state(|| DeviceKind::Input);
-    let catalog = stub_device_catalog();
+    let catalog = use_state(DeviceCatalog::default);
+    let catalog_error = use_state(|| Option::<String>::None);
+
+    {
+        let catalog = catalog.clone();
+        let catalog_error = catalog_error.clone();
+        use_effect_with((), move |_| {
+            spawn_local(async move {
+                match load_device_catalog().await {
+                    Ok(next) => {
+                        catalog.set(next);
+                        catalog_error.set(None);
+                    }
+                    Err(err) => catalog_error.set(Some(err)),
+                }
+            });
+            || ()
+        });
+    }
 
     let on_input_level = on_level_input(props.on_input_level_change.clone());
     let on_output_level = on_level_input(props.on_output_level_change.clone());
 
     let current_list = match *tab {
         DeviceKind::Input => render_device_list(
-            catalog.inputs,
-            props.selected_mic_device_id,
+            catalog.inputs.as_slice(),
+            &props.selected_mic_device_id,
             props.on_mic_device_change.clone(),
         ),
         DeviceKind::Output => render_device_list(
-            catalog.outputs,
-            props.selected_speaker_device_id,
+            catalog.outputs.as_slice(),
+            &props.selected_speaker_device_id,
             props.on_speaker_device_change.clone(),
         ),
         DeviceKind::Camera => render_device_list(
-            catalog.cameras,
-            props.selected_camera_device_id,
+            catalog.cameras.as_slice(),
+            &props.selected_camera_device_id,
             props.on_camera_device_change.clone(),
         ),
     };
@@ -157,6 +176,10 @@ pub fn SettingsPanel(props: &SettingsPanelProps) -> Html {
 
                     { current_list }
 
+                    if let Some(message) = &*catalog_error {
+                        <p class="body-md" role="alert">{ message }</p>
+                    }
+
                     if matches!(*tab, DeviceKind::Input) {
                         <div class="settings-panel__slider-row">
                             { level_slider(props.input_level, on_input_level) }
@@ -194,30 +217,34 @@ fn tab_button(tab_kind: DeviceKind, selected: UseStateHandle<DeviceKind>) -> Htm
 
 fn render_device_list(
     devices: &[DeviceEntry],
-    selected_device_id: &'static str,
-    on_select_device: Callback<&'static str>,
+    selected_device_id: &str,
+    on_select_device: Callback<String>,
 ) -> Html {
     html! {
         <div class="settings-panel__list">
-            {
-                for devices.iter().map(|entry| {
-                    let is_selected = selected_device_id == entry.id;
-                    let selected_class = is_selected.then_some("settings-panel__item--selected");
-                    let onclick = {
-                        let on_select_device = on_select_device.clone();
-                        let id = entry.id;
-                        Callback::from(move |_| on_select_device.emit(id))
-                    };
-                    html! {
-                        <button
-                            type="button"
-                            class={classes!("settings-panel__item", selected_class)}
-                            onclick={onclick}
-                        >
-                            <span>{ entry.label }</span>
-                        </button>
-                    }
-                })
+            if devices.is_empty() {
+                <p class="body-md">{ "No devices found." }</p>
+            } else {
+                <>
+                    { for devices.iter().map(|entry| {
+                        let is_selected = selected_device_id == entry.id;
+                        let selected_class = is_selected.then_some("settings-panel__item--selected");
+                        let onclick = {
+                            let on_select_device = on_select_device.clone();
+                            let id = entry.id.clone();
+                            Callback::from(move |_| on_select_device.emit(id.clone()))
+                        };
+                        html! {
+                            <button
+                                type="button"
+                                class={classes!("settings-panel__item", selected_class)}
+                                onclick={onclick}
+                            >
+                                <span>{ entry.label.clone() }</span>
+                            </button>
+                        }
+                    }) }
+                </>
             }
         </div>
     }

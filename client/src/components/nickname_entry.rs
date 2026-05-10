@@ -65,7 +65,10 @@ pub fn NicknameEntry(props: &NicknameEntryProps) -> Html {
                     is_submitting.set(true);
                     spawn_local(async move {
                         match submit_nickname(&value).await {
-                            Ok(response) => on_success.emit(response.session_id),
+                            Ok(response) => {
+                                let _confirmed_nickname = response.nickname;
+                                on_success.emit(response.session_id);
+                            }
                             Err(message) => validation_error.set(Some(message)),
                         }
                         is_submitting.set(false);

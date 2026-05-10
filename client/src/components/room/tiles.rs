@@ -20,7 +20,11 @@ pub fn truncate_str(s: &str, max: usize) -> String {
 ///
 /// `left = true` → left-pointing (previous); `false` → right-pointing (next).
 pub fn page_arrow_chevron(left: bool) -> Html {
-    let d = if left { "M15 18L9 12L15 6" } else { "M9 18L15 12L9 6" };
+    let d = if left {
+        "M15 18L9 12L15 6"
+    } else {
+        "M9 18L15 12L9 6"
+    };
     html! {
         <svg
             class="room-page__page-arrow-icon"

@@ -12,14 +12,12 @@ use crate::session_registry::SessionRegistry;
 #[derive(Debug, Clone, Copy)]
 pub enum DegradationReason {
     RedisDown,
-    RoomManagerDown,
 }
 
 impl DegradationReason {
     pub fn as_str(&self) -> &'static str {
         match self {
             DegradationReason::RedisDown => "redis",
-            DegradationReason::RoomManagerDown => "room_manager",
         }
     }
 }
@@ -29,7 +27,6 @@ pub struct State {
     pub config: Arc<Config>,
     pub redis: ::redis::Client,
     pub sfu: crate::sfu::Registry,
-    pub room_manager: crate::room_manager::Client,
     pub peers: PeerRegistry,
     pub sessions: SessionRegistry,
     purging: Arc<AtomicBool>,
@@ -40,7 +37,6 @@ impl State {
         config: Arc<Config>,
         redis: ::redis::Client,
         sfu: crate::sfu::Registry,
-        room_manager: crate::room_manager::Client,
         peers: PeerRegistry,
         sessions: SessionRegistry,
     ) -> Self {
@@ -48,7 +44,6 @@ impl State {
             config,
             redis,
             sfu,
-            room_manager,
             peers,
             sessions,
             purging: Arc::new(AtomicBool::new(false)),
@@ -182,8 +177,8 @@ impl State {
         }
 
         if room_empty {
-            if let Err(err) = self.room_manager.close_room(room_id).await {
-                warn!(error = %err, room_id = %room_id, "failed to close empty room in room manager");
+            if let Err(err) = redis::close_room_binding(&self.redis, room_id).await {
+                warn!(error = %err, room_id = %room_id, "failed to close empty room binding");
             }
         }
     }
@@ -223,8 +218,8 @@ impl State {
             let affected_sessions = self.sessions.clear_room(&room_id).await;
 
             if self.is_redis_available().await {
-                if let Err(err) = self.room_manager.close_room(&room_id).await {
-                    warn!(error = %err, room_id = %room_id, "failed to close room after sfu down");
+                if let Err(err) = redis::close_room_binding(&self.redis, &room_id).await {
+                    warn!(error = %err, room_id = %room_id, "failed to close room binding after sfu down");
                 }
                 if let Err(err) = redis::delete_room(&self.redis, &room_id).await {
                     warn!(
@@ -248,4 +243,3 @@ impl State {
         }
     }
 }
-

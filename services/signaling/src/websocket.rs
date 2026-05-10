@@ -6,21 +6,18 @@ use futures_util::StreamExt;
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::timeout;
-use tonic::Code;
 use tracing::warn;
 use uuid::Uuid;
 
 use crate::auth;
 use crate::message::{ClientMessage, ServerErrorCode, ServerMessage};
 use crate::redis::{self, RedisRoomError, SessionState};
-use crate::room_manager::{BindingStatus, RoomManagerError};
 use crate::sfu::SfuClientError;
 use crate::state::State;
 
 #[derive(Default)]
 struct ConnectionContext {
     session_id: Option<String>,
-    keep_session_for_transfer: bool,
     cached_session: Option<SessionState>,
     allowed_intent: Option<String>,
     allowed_room_id: Option<String>,
@@ -60,16 +57,10 @@ enum WsHandlerError {
     ParticipantNotInRoom,
     #[error("redis operation failed")]
     RedisError,
-    #[error("room transfer target is unavailable")]
-    TransferUnavailable,
-    #[error("room assignment still pending")]
-    RoomNotReady,
-    #[error("room manager unavailable")]
-    ControlPlaneUnavailable,
-    #[error("room coordinator queue full")]
-    CoordinatorQueueFull,
-    #[error("invalid room assignment from coordinator")]
+    #[error("invalid room assignment")]
     InvalidRoomAssignment,
+    #[error("no ready SFU capacity")]
+    SfuCapacityExhausted,
     #[error("sfu is unavailable")]
     SfuUnavailable,
     #[error("sfu rejected signaling request")]
@@ -238,7 +229,6 @@ async fn handle_client_message(
             .map_err(map_redis_error)?;
 
             context.session_id = Some(claims.session_id.clone());
-            context.keep_session_for_transfer = false;
             context.cached_session = Some(session.clone());
             context.allowed_intent = Some(claims.intent);
             context.allowed_room_id = claims.room_id;
@@ -303,7 +293,6 @@ async fn handle_client_message(
                 handle.stop();
             }
             context.session_id = None;
-            context.keep_session_for_transfer = false;
             context.cached_session = None;
             send_message(
                 socket,
@@ -459,18 +448,6 @@ async fn cleanup_connection(state: &State, context: &mut ConnectionContext) {
         return;
     };
 
-    if context.keep_session_for_transfer {
-        if context.instance_load_registered && state.is_redis_available().await {
-            if let Err(err) =
-                redis::decrement_instance_load(&state.redis, &state.config.public_node_id()).await
-            {
-                warn!(error = %err, "failed to decrement signaling instance load");
-            }
-        }
-        state.sessions.remove(session_id).await;
-        return;
-    }
-
     if !state.is_redis_available().await {
         state.sessions.remove(session_id).await;
         return;
@@ -567,29 +544,17 @@ fn map_error(err: &WsHandlerError) -> (ServerErrorCode, &'static str) {
         WsHandlerError::ParticipantNotInRoom => {
             (ServerErrorCode::NotInRoom, "Participant is not in room")
         }
-        WsHandlerError::RoomNotReady => (
-            ServerErrorCode::RoomNotReady,
-            "Room is still being assigned to an SFU; retry later",
-        ),
-        WsHandlerError::ControlPlaneUnavailable => (
-            ServerErrorCode::ControlPlaneUnavailable,
-            "Room coordinator is unavailable",
-        ),
-        WsHandlerError::CoordinatorQueueFull => (
-            ServerErrorCode::CoordinatorQueueFull,
-            "Room coordinator queue is full; retry later",
-        ),
         WsHandlerError::InvalidRoomAssignment => (
             ServerErrorCode::InvalidRoomAssignment,
-            "Invalid room assignment from coordinator",
+            "Invalid room assignment",
+        ),
+        WsHandlerError::SfuCapacityExhausted => (
+            ServerErrorCode::SfuCapacityExhausted,
+            "No ready SFU capacity is available",
         ),
         WsHandlerError::RedisError => (
             ServerErrorCode::StorageUnavailable,
             "Storage operation failed",
-        ),
-        WsHandlerError::TransferUnavailable => (
-            ServerErrorCode::TransferUnavailable,
-            "Room transfer target is unavailable",
         ),
         WsHandlerError::NotInRoom => (
             ServerErrorCode::NotInRoom,
@@ -633,7 +598,9 @@ fn map_redis_error(err: RedisRoomError) -> WsHandlerError {
         RedisRoomError::RoomNotFound => WsHandlerError::RoomNotFound,
         RedisRoomError::NicknameTaken => WsHandlerError::NicknameTaken,
         RedisRoomError::ParticipantNotInRoom => WsHandlerError::ParticipantNotInRoom,
-        RedisRoomError::InvalidRoomTarget => WsHandlerError::TransferUnavailable,
+        RedisRoomError::NoSfuCapacity => WsHandlerError::SfuCapacityExhausted,
+        RedisRoomError::RoomAlreadyExists => WsHandlerError::InvalidRoomAssignment,
+        RedisRoomError::InvalidRoomTarget => WsHandlerError::InvalidRoomAssignment,
         RedisRoomError::Timeout | RedisRoomError::Redis(_) => WsHandlerError::RedisError,
     }
 }
@@ -644,16 +611,6 @@ fn map_sfu_error(err: SfuClientError) -> WsHandlerError {
             WsHandlerError::SfuUnavailable
         }
         SfuClientError::Rejected(_) => WsHandlerError::SfuRejected,
-    }
-}
-
-fn map_room_manager_error(err: RoomManagerError) -> WsHandlerError {
-    match err {
-        RoomManagerError::InvalidAssignment => WsHandlerError::InvalidRoomAssignment,
-        RoomManagerError::Transport(status) => match status.code() {
-            Code::ResourceExhausted => WsHandlerError::CoordinatorQueueFull,
-            _ => WsHandlerError::ControlPlaneUnavailable,
-        },
     }
 }
 
@@ -761,22 +718,18 @@ async fn handle_join_locked(
         .await
         .map_err(map_redis_error)?;
     if !is_local_target(state, &route) {
-        context.keep_session_for_transfer = true;
-        send_message(
-            socket,
-            ServerMessage::TransferRequired {
-                room_id,
-                target_host: route.owner_host,
-                target_port: route.owner_port,
-            },
-            state.config.ws_write_timeout,
-        )
-        .await
-        .map_err(log_write_failure)?;
-        return Ok(());
+        warn!(
+            room_id = %room_id,
+            expected_host = %state.config.signaling_public_host,
+            expected_port = state.config.signaling_public_port,
+            actual_host = %route.owner_host,
+            actual_port = route.owner_port,
+            "connector routed join to a non-owner signaling instance"
+        );
+        return Err(WsHandlerError::InvalidRoomAssignment);
     }
     if route.room_state != "active" {
-        return Err(WsHandlerError::RoomNotReady);
+        return Err(WsHandlerError::InvalidRoomAssignment);
     }
     let sfu_addr = route.sfu_grpc_addr.ok_or(WsHandlerError::SfuUnavailable)?;
 
@@ -803,7 +756,6 @@ async fn handle_join_locked(
     if let Some(cached) = context.cached_session.as_mut() {
         cached.room_id = Some(room_id.clone());
     }
-    context.keep_session_for_transfer = false;
     send_message(
         socket,
         ServerMessage::Joined {
@@ -853,40 +805,23 @@ async fn handle_create_locked(
         return Err(WsHandlerError::Unauthorized);
     }
 
-    let room_id = session
-        .pending_room_id
-        .clone()
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let (binding_status, binding) = state
-        .room_manager
-        .get_room(
-            &room_id,
-            &state.config.public_node_id(),
-            &state.config.signaling_public_host,
-            state.config.signaling_public_port,
-            true,
-        )
-        .await
-        .map_err(map_room_manager_error)?;
-    if binding_status != BindingStatus::Assigned || binding.room_state != "active" {
-        redis::session_set_pending_room(&state.redis, session_id, Some(&room_id))
-            .await
-            .map_err(map_redis_error)?;
-        state
-            .sessions
-            .set_pending_room(session_id, Some(room_id.clone()))
-            .await;
-        if let Some(cached) = context.cached_session.as_mut() {
-            cached.pending_room_id = Some(room_id);
+    let room_id = Uuid::new_v4().to_string();
+    let assignment = redis::assign_room_to_least_loaded_sfu(
+        &state.redis,
+        &room_id,
+        &state.config.public_node_id(),
+        &state.config.signaling_public_host,
+        state.config.signaling_public_port,
+    )
+    .await
+    .map_err(map_redis_error)?;
+    let sfu_addr = assignment.sfu_grpc_addr;
+    if let Err(err) = redis::join_room(&state.redis, &room_id, &session.nickname).await {
+        if let Err(close_err) = redis::close_room_binding(&state.redis, &room_id).await {
+            warn!(error = %close_err, room_id = %room_id, "failed to close room binding after join failure");
         }
-        return Err(WsHandlerError::RoomNotReady);
+        return Err(map_redis_error(err));
     }
-    let sfu_addr = binding
-        .sfu_grpc_addr
-        .ok_or(WsHandlerError::SfuUnavailable)?;
-    let _ = redis::join_room(&state.redis, &room_id, &session.nickname)
-        .await
-        .map_err(map_redis_error)?;
     if let Err(err) = state
         .sfu
         .ensure_peer(state, &sfu_addr, &room_id, &session.nickname)
@@ -895,11 +830,11 @@ async fn handle_create_locked(
         if let Err(srem_err) = redis::srem_member(&state.redis, &room_id, &session.nickname).await {
             warn!(error = %srem_err, room_id = %room_id, "compensating srem failed after sfu ensure_peer");
         }
+        if let Err(close_err) = redis::close_room_binding(&state.redis, &room_id).await {
+            warn!(error = %close_err, room_id = %room_id, "failed to close room binding after sfu ensure_peer failure");
+        }
         return Err(map_sfu_error(err));
     }
-    redis::session_set_pending_room(&state.redis, session_id, None)
-        .await
-        .map_err(map_redis_error)?;
     redis::session_set_room(&state.redis, session_id, Some(&room_id))
         .await
         .map_err(map_redis_error)?;
@@ -907,12 +842,9 @@ async fn handle_create_locked(
         .sessions
         .set_room(session_id, Some(room_id.clone()))
         .await;
-    state.sessions.set_pending_room(session_id, None).await;
     if let Some(cached) = context.cached_session.as_mut() {
         cached.room_id = Some(room_id.clone());
-        cached.pending_room_id = None;
     }
-    context.keep_session_for_transfer = false;
     send_message(
         socket,
         ServerMessage::Created {

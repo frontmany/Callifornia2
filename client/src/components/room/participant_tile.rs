@@ -1,6 +1,6 @@
 //! Participant tile: optional video (`MediaStream`) plus label overlay.
 
-use super::tiles::{truncate_str, MAX_NAME_CHARS};
+use super::tiles::{MAX_NAME_CHARS, truncate_str};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::HtmlVideoElement;

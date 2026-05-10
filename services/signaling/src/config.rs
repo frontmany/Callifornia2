@@ -13,7 +13,6 @@ pub struct Config {
     /// Defaults to 0.0.0.0:50071 if not set.
     pub admin_grpc_addr: String,
     pub redis_url: String,
-    pub room_manager_grpc_addr: String,
     pub connector_token_secret: String,
     pub redis_connect_timeout: Duration,
     pub rpc_connect_timeout: Duration,
@@ -42,8 +41,6 @@ impl Config {
             .context("SIGNALING_PUBLIC_PORT")?;
         let admin_grpc_addr = get_env_or("SIGNALING_ADMIN_GRPC_ADDR", "0.0.0.0:50071");
         let redis_url = get_env_or("REDIS_URL", "redis://redis:6379/");
-        let room_manager_grpc_addr =
-            get_env_or("ROOM_MANAGER_GRPC_ADDR", "http://room-manager:50061");
         let connector_token_secret =
             get_env_or("CONNECTOR_TOKEN_SECRET", "dev-connector-token-secret");
 
@@ -78,7 +75,6 @@ impl Config {
             signaling_public_port,
             admin_grpc_addr,
             redis_url,
-            room_manager_grpc_addr,
             connector_token_secret,
             redis_connect_timeout,
             rpc_connect_timeout,

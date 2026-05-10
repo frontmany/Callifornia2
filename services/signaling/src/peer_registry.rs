@@ -135,6 +135,9 @@ impl PeerRegistry {
 
     pub async fn peer_count(&self) -> u32 {
         let peers = self.inner.read().await;
-        peers.values().map(|room_peers| room_peers.len() as u32).sum()
+        peers
+            .values()
+            .map(|room_peers| room_peers.len() as u32)
+            .sum()
     }
 }

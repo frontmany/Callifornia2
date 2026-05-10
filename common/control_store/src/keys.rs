@@ -6,11 +6,10 @@ pub const SIGNALING_NICK_PREFIX: &str = "signaling:nick:";
 pub const SIGNALING_ROOM_PREFIX: &str = "signaling:room:";
 pub const SIGNALING_JTI_PREFIX: &str = "signaling:jti:";
 
-// ── Room-manager namespace ────────────────────────────────────────────────────
-pub const ROOM_BINDING_PREFIX: &str = "room_manager:room:";
-pub const SFU_INSTANCES_KEY: &str = "room_manager:sfu_instances";
-pub const SFU_ROOM_LOAD_KEY: &str = "room_manager:sfu_room_load";
-pub const WAITING_REQUESTS_KEY: &str = "room_manager:waiting_requests";
+// ── Room / SFU routing namespace ─────────────────────────────────────────────
+pub const ROOM_BINDING_PREFIX: &str = "room:";
+pub const SFU_INSTANCES_KEY: &str = "sfu:instances";
+pub const SFU_ROOM_LOAD_KEY: &str = "sfu:room_load";
 
 // ── Supervisor namespace ──────────────────────────────────────────────────────
 pub const SUPERVISOR_HEARTBEAT_KEY: &str = "supervisor:heartbeat";

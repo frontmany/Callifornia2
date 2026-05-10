@@ -49,112 +49,73 @@ struct SessionRenewRequest<'a> {
 /// Refreshes Redis session TTL while the user is idle on HTTP (nick keys no longer expire).
 /// Call periodically (e.g. before `SESSION_TTL_SEC` elapses) when not connected over WebSocket.
 pub async fn renew_session(session_id: &str) -> Result<(), String> {
-    let _ = session_id;
-    // DEV STUB: network is disabled during UI-only development.
-    // Real request (kept commented for quick restore):
-    // let body = serde_json::to_string(&SessionRenewRequest { session_id })
-    //     .map_err(|err| err.to_string())?;
-    // let response = Request::post(&endpoint("/session/renew"))
-    //     .header("content-type", "application/json")
-    //     .body(body)
-    //     .map_err(|err| err.to_string())?
-    //     .send()
-    //     .await
-    //     .map_err(|err| err.to_string())?;
-    // let status = response.status();
-    // if (200..300).contains(&status) {
-    //     Ok(())
-    // } else {
-    //     match response.json::<ServiceErrorPayload>().await {
-    //         Ok(err) => Err(err.message),
-    //         Err(_) => Err(status_error_message(status).to_owned()),
-    //     }
-    // }
-    Ok(())
+    let body = serde_json::to_string(&SessionRenewRequest { session_id })
+        .map_err(|err| err.to_string())?;
+    let response = post_json("/session/renew", body).await?;
+    parse_empty_response(response).await
 }
 
 pub async fn auth(nickname: &str) -> Result<AuthResponse, String> {
-    // DEV STUB: network is disabled during UI-only development.
-    // Real request (kept commented for quick restore):
-    // let body = serde_json::to_string(&AuthRequest { nickname }).map_err(|err| err.to_string())?;
-    // let response = Request::post(&endpoint("/auth"))
-    //     .header("content-type", "application/json")
-    //     .body(body)
-    //     .map_err(|err| err.to_string())?
-    //     .send()
-    //     .await
-    //     .map_err(|err| err.to_string())?;
-    // return parse_json_response(response).await;
-    Ok(AuthResponse {
-        nickname: nickname.to_owned(),
-        session_id: "dev-session".to_owned(),
-    })
+    let body = serde_json::to_string(&AuthRequest { nickname }).map_err(|err| err.to_string())?;
+    let response = post_json("/auth", body).await?;
+    parse_json_response(response).await
 }
 
 pub async fn create(session_id: &str) -> Result<SignalingReadyResponse, String> {
-    // DEV STUB: network is disabled during UI-only development.
-    // Real request (kept commented for quick restore):
-    // let body =
-    //     serde_json::to_string(&CreateRequest { session_id }).map_err(|err| err.to_string())?;
-    // let response = Request::post(&endpoint("/create"))
-    //     .header("content-type", "application/json")
-    //     .body(body)
-    //     .map_err(|err| err.to_string())?
-    //     .send()
-    //     .await
-    //     .map_err(|err| err.to_string())?;
-    // return parse_json_response(response).await;
-    Ok(SignalingReadyResponse {
-        signaling_url: "ws://127.0.0.1:8080/ws".to_owned(),
-        session_id: session_id.to_owned(),
-        token: "dev-token".to_owned(),
-    })
+    let body =
+        serde_json::to_string(&CreateRequest { session_id }).map_err(|err| err.to_string())?;
+    let response = post_json("/create", body).await?;
+    parse_json_response(response).await
 }
 
 pub async fn join(session_id: &str, room_id: &str) -> Result<SignalingReadyResponse, String> {
-    let _ = room_id;
-    // DEV STUB: network is disabled during UI-only development.
-    // Real request (kept commented for quick restore):
-    // let body = serde_json::to_string(&JoinRequest {
-    //     session_id,
-    //     room_id,
-    // })
-    // .map_err(|err| err.to_string())?;
-    // let response = Request::post(&endpoint("/join"))
-    //     .header("content-type", "application/json")
-    //     .body(body)
-    //     .map_err(|err| err.to_string())?
-    //     .send()
-    //     .await
-    //     .map_err(|err| err.to_string())?;
-    // return parse_json_response(response).await;
-    Ok(SignalingReadyResponse {
-        signaling_url: "ws://127.0.0.1:8080/ws".to_owned(),
-        session_id: session_id.to_owned(),
-        token: "dev-token".to_owned(),
+    let body = serde_json::to_string(&JoinRequest {
+        session_id,
+        room_id,
     })
+    .map_err(|err| err.to_string())?;
+    let response = post_json("/join", body).await?;
+    parse_json_response(response).await
 }
 
 pub fn logout_best_effort(session_id: String) {
-    let _ = session_id;
-    // DEV STUB: noop while network is disabled.
-    // Real request (kept commented for quick restore):
-    // spawn_local(async move {
-    //     let body = match serde_json::to_string(&LogoutRequest {
-    //         session_id: &session_id,
-    //     }) {
-    //         Ok(body) => body,
-    //         Err(_) => return,
-    //     };
-    //     let request = match Request::post(&endpoint("/logout"))
-    //         .header("content-type", "application/json")
-    //         .body(body)
-    //     {
-    //         Ok(request) => request,
-    //         Err(_) => return,
-    //     };
-    //     let _ = request.send().await;
-    // });
+    spawn_local(async move {
+        let body = match serde_json::to_string(&LogoutRequest {
+            session_id: &session_id,
+        }) {
+            Ok(body) => body,
+            Err(_) => return,
+        };
+        let Ok(request) = Request::post(&endpoint("/logout"))
+            .header("content-type", "application/json")
+            .body(body)
+        else {
+            return;
+        };
+        let _ = request.send().await;
+    });
+}
+
+async fn post_json(path: &str, body: String) -> Result<gloo_net::http::Response, String> {
+    Request::post(&endpoint(path))
+        .header("content-type", "application/json")
+        .body(body)
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+async fn parse_empty_response(response: gloo_net::http::Response) -> Result<(), String> {
+    let status = response.status();
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        match response.json::<ServiceErrorPayload>().await {
+            Ok(err) => Err(err.message),
+            Err(_) => Err(status_error_message(status).to_owned()),
+        }
+    }
 }
 
 async fn parse_json_response<T>(response: gloo_net::http::Response) -> Result<T, String>

@@ -4,7 +4,6 @@ mod config;
 mod message;
 mod peer_registry;
 mod redis;
-mod room_manager;
 mod session_registry;
 mod sfu;
 mod state;
@@ -12,7 +11,6 @@ mod websocket;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::http::StatusCode;
@@ -25,7 +23,6 @@ use serde::Serialize;
 use session_registry::SessionRegistry;
 use state::DegradationReason;
 use state::State;
-use tonic::transport::{Channel, Endpoint};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use websocket::ws_upgrade;
@@ -46,10 +43,6 @@ async fn main() -> Result<()> {
     redis::set_op_timeout(config.redis_op_timeout);
     info!("Redis is reachable");
 
-    let room_manager_channel =
-        connect_grpc(&config.room_manager_grpc_addr, config.rpc_connect_timeout).await?;
-    info!(addr = %config.room_manager_grpc_addr, "Connected to Room Manager gRPC endpoint");
-
     let sfu = sfu::Registry::new(
         config.public_node_id(),
         config.rpc_connect_timeout,
@@ -57,18 +50,19 @@ async fn main() -> Result<()> {
         config.sfu_backoff_min,
         config.sfu_backoff_max,
     );
-    let room_manager = room_manager::Client::new(room_manager_channel);
     let peers = PeerRegistry::default();
     let sessions = SessionRegistry::default();
 
-    let state = State::new(Arc::new(config), redis, sfu, room_manager, peers, sessions);
+    let state = State::new(Arc::new(config), redis, sfu, peers, sessions);
 
     // Start the internal admin gRPC server (supervisor-only).
-    let admin_grpc_addr: std::net::SocketAddr = state
-        .config
-        .admin_grpc_addr
-        .parse()
-        .with_context(|| format!("invalid SIGNALING_ADMIN_GRPC_ADDR: {}", state.config.admin_grpc_addr))?;
+    let admin_grpc_addr: std::net::SocketAddr =
+        state.config.admin_grpc_addr.parse().with_context(|| {
+            format!(
+                "invalid SIGNALING_ADMIN_GRPC_ADDR: {}",
+                state.config.admin_grpc_addr
+            )
+        })?;
     let admin_state = state.clone();
     tokio::spawn(async move {
         info!(%admin_grpc_addr, "Admin gRPC server starting");
@@ -97,9 +91,7 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             warn!("signaling shutdown: running purge protocol");
-            shutdown_state
-                .run_purge(DegradationReason::RoomManagerDown)
-                .await;
+            shutdown_state.run_purge(DegradationReason::RedisDown).await;
         })
         .await
         .context("run http server")?;
@@ -115,22 +107,6 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
-}
-
-async fn connect_grpc(addr: &str, connect_timeout: Duration) -> Result<Channel> {
-    let endpoint = Endpoint::from_shared(addr.to_owned())
-        .with_context(|| format!("invalid gRPC addr: {addr}"))?
-        .connect_timeout(connect_timeout)
-        .tcp_nodelay(true)
-        .tcp_keepalive(Some(Duration::from_secs(30)))
-        .http2_keep_alive_interval(Duration::from_secs(20))
-        .keep_alive_timeout(Duration::from_secs(10))
-        .keep_alive_while_idle(true);
-
-    endpoint
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to gRPC endpoint: {addr}"))
 }
 
 #[derive(Serialize)]
@@ -169,4 +145,3 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 }
-

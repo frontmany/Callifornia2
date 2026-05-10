@@ -37,8 +37,8 @@ impl Config {
             .context("CONNECTOR_TOKEN_TTL_MS")?;
         let session_ttl =
             duration_from_secs_env("SESSION_TTL_SEC", 600).context("SESSION_TTL_SEC")?;
-        let signaling_stale_timeout = duration_from_secs_env("SIGNALING_STALE_SEC", 30)
-            .context("SIGNALING_STALE_SEC")?;
+        let signaling_stale_timeout =
+            duration_from_secs_env("SIGNALING_STALE_SEC", 30).context("SIGNALING_STALE_SEC")?;
         let supervisor_stale_sec = u64_env_or("SUPERVISOR_STALE_SEC", 30)?;
         let signaling_instances = parse_signaling_instances(&get_env_or(
             "SIGNALING_INSTANCES",

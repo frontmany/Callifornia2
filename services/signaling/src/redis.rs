@@ -11,8 +11,10 @@ static OP_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 const INSTANCE_LOAD_KEY: &str = "signaling:instance_load";
 const SESSION_PREFIX: &str = "signaling:session:";
 const NICK_PREFIX: &str = "signaling:nick:";
-const ROOM_BINDING_PREFIX: &str = "room_manager:room:";
+const ROOM_BINDING_PREFIX: &str = "room:";
 const ROOM_MEMBERS_PREFIX: &str = "signaling:room:";
+const SFU_INSTANCES_KEY: &str = "sfu:instances";
+const SFU_ROOM_LOAD_KEY: &str = "sfu:room_load";
 
 const COMPARE_AND_DEL_LUA: &str = r#"
 if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -22,11 +24,62 @@ else
 end
 "#;
 
+const ASSIGN_ROOM_TO_SFU_LUA: &str = r#"
+local instances = redis.call('HGETALL', KEYS[1])
+local now = tonumber(ARGV[6])
+local stale_after = tonumber(ARGV[7])
+local best_id = nil
+local best_grpc = nil
+local best_load = nil
+local best_payload = nil
+
+for i = 1, #instances, 2 do
+    local payload = instances[i + 1]
+    local inst = cjson.decode(payload)
+    local load = tonumber(redis.call('ZSCORE', KEYS[2], inst.instance_id) or '0')
+    local last_ping = tonumber(inst.last_ping_unix or 0)
+    local max_rooms = tonumber(inst.max_rooms or 0)
+
+    if inst.alive == true
+        and inst.state == 'ready'
+        and now - last_ping <= stale_after
+        and load < max_rooms
+        and (best_load == nil or load < best_load)
+    then
+        best_id = inst.instance_id
+        best_grpc = inst.grpc_addr
+        best_load = load
+        best_payload = inst
+    end
+end
+
+if best_id == nil then
+    return {}
+end
+
+if redis.call('EXISTS', KEYS[3]) == 1 then
+    return {'__ROOM_EXISTS__', ''}
+end
+
+redis.call('HSET', KEYS[3],
+    'owner_host', ARGV[2],
+    'owner_port', ARGV[3],
+    'signaling_owner_id', ARGV[4],
+    'room_state', 'active',
+    'sfu_instance_id', best_id,
+    'sfu_grpc_addr', best_grpc
+)
+redis.call('ZINCRBY', KEYS[2], 1, best_id)
+best_payload.idle_since_unix = 0
+redis.call('HSET', KEYS[1], best_id, cjson.encode(best_payload))
+
+return {best_id, best_grpc}
+"#;
+
 #[derive(Debug, Clone)]
 pub struct SessionState {
     pub nickname: String,
     pub room_id: Option<String>,
-    pub pending_room_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +88,11 @@ pub struct RoomRoute {
     pub owner_port: u16,
     pub room_state: String,
     pub sfu_grpc_addr: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SfuAssignment {
+    pub sfu_grpc_addr: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +110,10 @@ pub enum RedisRoomError {
     ParticipantNotInRoom,
     #[error("room target is invalid")]
     InvalidRoomTarget,
+    #[error("no ready SFU capacity")]
+    NoSfuCapacity,
+    #[error("room already exists")]
+    RoomAlreadyExists,
     #[error("redis operation timed out")]
     Timeout,
     #[error(transparent)]
@@ -197,15 +259,7 @@ pub async fn session_get(
             .get("room_id")
             .filter(|value| !value.is_empty())
             .cloned();
-        let pending_room_id = values
-            .get("pending_room_id")
-            .filter(|value| !value.is_empty())
-            .cloned();
-        Ok(Some(SessionState {
-            nickname,
-            room_id,
-            pending_room_id,
-        }))
+        Ok(Some(SessionState { nickname, room_id }))
     })
     .await
 }
@@ -219,25 +273,6 @@ pub async fn session_set_room(
         let mut conn = client.get_connection_manager().await?;
         let _: usize = conn
             .hset(session_key(session_id), "room_id", room_id.unwrap_or(""))
-            .await?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn session_set_pending_room(
-    client: &Client,
-    session_id: &str,
-    room_id: Option<&str>,
-) -> Result<(), RedisRoomError> {
-    with_op_timeout(async move {
-        let mut conn = client.get_connection_manager().await?;
-        let _: usize = conn
-            .hset(
-                session_key(session_id),
-                "pending_room_id",
-                room_id.unwrap_or(""),
-            )
             .await?;
         Ok(())
     })
@@ -334,6 +369,48 @@ pub async fn get_room_route(client: &Client, room_id: &str) -> Result<RoomRoute,
     .await
 }
 
+pub async fn assign_room_to_least_loaded_sfu(
+    client: &Client,
+    room_id: &str,
+    signaling_owner_id: &str,
+    signaling_owner_host: &str,
+    signaling_owner_port: u16,
+) -> Result<SfuAssignment, RedisRoomError> {
+    let now = unix_now();
+    let assignment = with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let result: Vec<String> = redis::Script::new(ASSIGN_ROOM_TO_SFU_LUA)
+            .key(SFU_INSTANCES_KEY)
+            .key(SFU_ROOM_LOAD_KEY)
+            .key(room_binding_key(room_id))
+            .arg(room_id)
+            .arg(signaling_owner_host)
+            .arg(signaling_owner_port)
+            .arg(signaling_owner_id)
+            .arg("active")
+            .arg(now)
+            .arg(30_i64)
+            .invoke_async(&mut conn)
+            .await?;
+
+        if result.is_empty() {
+            return Ok(None);
+        }
+        if result.first().map(String::as_str) == Some("__ROOM_EXISTS__") {
+            return Err(RedisRoomError::RoomAlreadyExists);
+        }
+        let sfu_grpc_addr = result
+            .get(1)
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .ok_or(RedisRoomError::InvalidRoomTarget)?;
+        Ok(Some(SfuAssignment { sfu_grpc_addr }))
+    })
+    .await?;
+
+    assignment.ok_or(RedisRoomError::NoSfuCapacity)
+}
+
 pub async fn join_room(
     client: &Client,
     room_id: &str,
@@ -408,6 +485,63 @@ pub async fn leave_room(
     .await
 }
 
+pub async fn close_room_binding(client: &Client, room_id: &str) -> Result<bool, RedisRoomError> {
+    let instance_id = with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let binding_key = room_binding_key(room_id);
+        let instance_id: Option<String> = conn.hget(&binding_key, "sfu_instance_id").await?;
+        let deleted: usize = conn.del(&binding_key).await?;
+        Ok(if deleted == 0 { None } else { instance_id })
+    })
+    .await?;
+
+    let Some(instance_id) = instance_id else {
+        return Ok(false);
+    };
+
+    decrement_sfu_room_load(client, &instance_id).await?;
+    Ok(true)
+}
+
+async fn decrement_sfu_room_load(client: &Client, instance_id: &str) -> Result<(), RedisRoomError> {
+    let next = with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let current: Option<f64> = conn.zscore(SFU_ROOM_LOAD_KEY, instance_id).await?;
+        let current = current.unwrap_or(0.0);
+        let next = if current <= 1.0 { 0.0 } else { current - 1.0 };
+        let _: usize = conn.zadd(SFU_ROOM_LOAD_KEY, instance_id, next).await?;
+        Ok(next)
+    })
+    .await?;
+
+    if next == 0.0 {
+        update_sfu_idle_since(client, instance_id, unix_now()).await?;
+    }
+    Ok(())
+}
+
+async fn update_sfu_idle_since(
+    client: &Client,
+    instance_id: &str,
+    idle_since_unix: i64,
+) -> Result<(), RedisRoomError> {
+    with_op_timeout(async move {
+        let mut conn = client.get_connection_manager().await?;
+        let payload: Option<String> = conn.hget(SFU_INSTANCES_KEY, instance_id).await?;
+        let Some(payload) = payload else {
+            return Ok(());
+        };
+        let mut json: serde_json::Value =
+            serde_json::from_str(&payload).map_err(|_| RedisRoomError::InvalidRoomTarget)?;
+        json["idle_since_unix"] = serde_json::Value::from(idle_since_unix);
+        let _: usize = conn
+            .hset(SFU_INSTANCES_KEY, instance_id, json.to_string())
+            .await?;
+        Ok(())
+    })
+    .await
+}
+
 pub async fn delete_room(client: &Client, room_id: &str) -> Result<(), RedisRoomError> {
     with_op_timeout(async move {
         let mut conn = client.get_connection_manager().await?;
@@ -435,4 +569,11 @@ fn room_binding_key(room_id: &str) -> String {
 
 fn room_members_key(room_id: &str) -> String {
     format!("{ROOM_MEMBERS_PREFIX}{room_id}:members")
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }

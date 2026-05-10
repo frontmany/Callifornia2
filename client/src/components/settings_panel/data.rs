@@ -1,8 +1,8 @@
-//! Temporary device data for settings panel UI.
-//!
-//! NOTE: This file intentionally contains stubs. Replace these lists with
-//! browser-provided devices from `navigator.mediaDevices.enumerateDevices()`
-//! once media wiring is implemented.
+//! Browser device data for settings panel UI.
+
+use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::JsFuture;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeviceKind {
@@ -29,64 +29,97 @@ impl DeviceKind {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DeviceEntry {
-    pub id: &'static str,
-    pub label: &'static str,
+    pub id: String,
+    pub label: String,
 }
 
 /// All device groups used by [`crate::components::SettingsPanel`].
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct DeviceCatalog {
-    pub inputs: &'static [DeviceEntry],
-    pub outputs: &'static [DeviceEntry],
-    pub cameras: &'static [DeviceEntry],
+    pub inputs: Vec<DeviceEntry>,
+    pub outputs: Vec<DeviceEntry>,
+    pub cameras: Vec<DeviceEntry>,
 }
 
-pub fn stub_device_catalog() -> DeviceCatalog {
-    const INPUTS: &[DeviceEntry] = &[
-        DeviceEntry {
-            id: "mic-default",
-            label: "USB Microphone (Default)",
-        },
-        DeviceEntry {
-            id: "mic-realtek",
-            label: "Realtek HD Audio Input",
-        },
-        DeviceEntry {
-            id: "mic-virtual",
-            label: "Virtual Cable",
-        },
-    ];
-
-    const OUTPUTS: &[DeviceEntry] = &[
-        DeviceEntry {
-            id: "spk-default",
-            label: "Headphones (Default)",
-        },
-        DeviceEntry {
-            id: "spk-hd",
-            label: "Speakers (High Definition)",
-        },
-        DeviceEntry {
-            id: "spk-bt",
-            label: "Bluetooth Hands-Free",
-        },
-    ];
-
-    const CAMERAS: &[DeviceEntry] = &[
-        DeviceEntry {
-            id: "cam-integrated",
-            label: "Integrated Webcam",
-        },
-        DeviceEntry {
-            id: "cam-obs",
-            label: "OBS Virtual Camera",
-        },
-    ];
-
-    DeviceCatalog {
-        inputs: INPUTS,
-        outputs: OUTPUTS,
-        cameras: CAMERAS,
+pub async fn load_device_catalog() -> Result<DeviceCatalog, String> {
+    let window = web_sys::window().ok_or_else(|| "Window is not available.".to_owned())?;
+    let navigator = window.navigator();
+    let media_devices = js_sys::Reflect::get(&navigator, &JsValue::from_str("mediaDevices"))
+        .map_err(js_error_to_string)?;
+    if media_devices.is_undefined() || media_devices.is_null() {
+        return Err("Media devices are not supported by this browser.".to_owned());
     }
+
+    let enumerate_devices =
+        js_sys::Reflect::get(&media_devices, &JsValue::from_str("enumerateDevices"))
+            .map_err(js_error_to_string)?
+            .dyn_into::<js_sys::Function>()
+            .map_err(|_| "enumerateDevices is not available.".to_owned())?;
+    let promise = enumerate_devices
+        .call0(&media_devices)
+        .map_err(js_error_to_string)?
+        .dyn_into::<js_sys::Promise>()
+        .map_err(|_| "enumerateDevices did not return a Promise.".to_owned())?;
+    let devices = JsFuture::from(promise).await.map_err(js_error_to_string)?;
+    let devices = js_sys::Array::from(&devices);
+
+    let mut catalog = DeviceCatalog::default();
+    for value in devices.iter() {
+        let kind = get_string_property(&value, "kind");
+        let id = get_string_property(&value, "deviceId");
+        if id.is_empty() {
+            continue;
+        }
+        let label = get_string_property(&value, "label");
+        let label = if label.is_empty() {
+            default_label(&kind, catalog_len_for_kind(&catalog, &kind) + 1)
+        } else {
+            label
+        };
+        let entry = DeviceEntry { id, label };
+        match kind.as_str() {
+            "audioinput" => catalog.inputs.push(entry),
+            "audiooutput" => catalog.outputs.push(entry),
+            "videoinput" => catalog.cameras.push(entry),
+            _ => {}
+        }
+    }
+
+    Ok(catalog)
+}
+
+fn catalog_len_for_kind(catalog: &DeviceCatalog, kind: &str) -> usize {
+    match kind {
+        "audioinput" => catalog.inputs.len(),
+        "audiooutput" => catalog.outputs.len(),
+        "videoinput" => catalog.cameras.len(),
+        _ => 0,
+    }
+}
+
+fn default_label(kind: &str, index: usize) -> String {
+    match kind {
+        "audioinput" => format!("Microphone {index}"),
+        "audiooutput" => format!("Speaker {index}"),
+        "videoinput" => format!("Camera {index}"),
+        _ => format!("Device {index}"),
+    }
+}
+
+fn get_string_property(value: &JsValue, property: &str) -> String {
+    js_sys::Reflect::get(value, &JsValue::from_str(property))
+        .ok()
+        .and_then(|value| value.as_string())
+        .unwrap_or_default()
+}
+
+fn js_error_to_string(value: JsValue) -> String {
+    value.as_string().unwrap_or_else(|| {
+        js_sys::JSON::stringify(&value)
+            .ok()
+            .and_then(|s| s.as_string())
+            .unwrap_or_else(|| "Browser device operation failed.".to_owned())
+    })
 }

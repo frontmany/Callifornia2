@@ -103,8 +103,13 @@ async fn auth(
         .await
         .map_err(map_redis_error)?;
 
-    if let Err(err) =
-        redis::session_create(&state.redis, &session_id, &nickname, state.config.session_ttl).await
+    if let Err(err) = redis::session_create(
+        &state.redis,
+        &session_id,
+        &nickname,
+        state.config.session_ttl,
+    )
+    .await
     {
         let _ = redis::release_nick_lease(&state.redis, &nickname, &session_id).await;
         return Err(map_redis_error(err).into());
@@ -198,7 +203,8 @@ async fn logout(
         .map_err(map_redis_error)?;
     if let Some(session) = session {
         let _ = redis::session_delete(&state.redis, &payload.session_id).await;
-        let _ = redis::release_nick_lease(&state.redis, &session.nickname, &payload.session_id).await;
+        let _ =
+            redis::release_nick_lease(&state.redis, &session.nickname, &payload.session_id).await;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -220,13 +226,10 @@ async fn session_renew(
     if owner.as_deref() != Some(payload.session_id.as_str()) {
         return Err(HandlerError::Unauthorized.into());
     }
-    let ok = redis::session_refresh_ttl(
-        &state.redis,
-        &payload.session_id,
-        state.config.session_ttl,
-    )
-    .await
-    .map_err(map_redis_error)?;
+    let ok =
+        redis::session_refresh_ttl(&state.redis, &payload.session_id, state.config.session_ttl)
+            .await
+            .map_err(map_redis_error)?;
     if !ok {
         return Err(HandlerError::Unauthorized.into());
     }
@@ -260,8 +263,7 @@ async fn select_least_loaded_signaling(
     let alive = redis::alive_signaling_nodes(&state.redis, state.config.signaling_stale_timeout)
         .await
         .map_err(map_redis_error)?;
-    let alive_set: std::collections::HashSet<&str> =
-        alive.iter().map(String::as_str).collect();
+    let alive_set: std::collections::HashSet<&str> = alive.iter().map(String::as_str).collect();
 
     state
         .config
@@ -313,7 +315,10 @@ fn map_error(err: &HandlerError) -> (ServerErrorCode, &'static str) {
         HandlerError::Unauthorized => (ServerErrorCode::Unauthorized, "Unauthorized session"),
         HandlerError::NicknameTaken => (ServerErrorCode::NicknameTaken, "Nickname already taken"),
         HandlerError::RoomNotFound => (ServerErrorCode::RoomNotFound, "Room not found"),
-        HandlerError::Redis => (ServerErrorCode::StorageUnavailable, "Storage operation failed"),
+        HandlerError::Redis => (
+            ServerErrorCode::StorageUnavailable,
+            "Storage operation failed",
+        ),
         HandlerError::SignalingUnavailable => (
             ServerErrorCode::NoHealthySignaling,
             "No healthy signaling instance",

@@ -21,19 +21,13 @@ pub enum ServerErrorCode {
     NicknameTaken,
     AlreadyInRoom,
     NotInRoom,
-    /// Room binding exists but SFU assignment is still in progress (retry).
-    RoomNotReady,
-    TransferUnavailable,
 
     // --- Media path ---
+    SfuCapacityExhausted,
     SfuUnavailable,
     SfuRejected,
 
-    // --- Control plane & storage (node is healthy; single operation failed) ---
-    /// Room Manager gRPC unreachable or error (not "pending assignment").
-    ControlPlaneUnavailable,
-    /// Room coordinator signaled queue / capacity exhaustion.
-    CoordinatorQueueFull,
+    // --- Storage / routing (node is healthy; single operation failed) ---
     /// Unexpected or inconsistent data from room manager (e.g. bad port in response).
     InvalidRoomAssignment,
     /// Redis timeout or error while the node is not in global degraded purge.
@@ -106,11 +100,6 @@ pub enum ServerMessage {
         your_nickname: String,
         participants: Vec<String>,
     },
-    TransferRequired {
-        room_id: String,
-        target_host: String,
-        target_port: u16,
-    },
     RoomClosed {
         room_id: String,
         reason: String,
@@ -128,7 +117,7 @@ pub enum ServerMessage {
         code: ServerErrorCode,
         message: String,
     },
-    /// Node-wide degradation (Redis or room_manager down); sent before connections are closed.
+    /// Node-wide degradation (Redis down); sent before connections are closed.
     ServiceUnavailable {
         dependency: String,
         retry_after_ms: u32,

@@ -3,9 +3,11 @@
 #[path = "main_menu/icons.rs"]
 mod icons;
 
+use crate::app::SettingsState;
 use crate::components::SettingsPanel;
 use crate::connector_api;
-use crate::app::SettingsState;
+use crate::connector_api::SignalingReadyResponse;
+use crate::signaling::SignalingIntent;
 use crate::theme::Theme;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -18,13 +20,13 @@ pub struct MainMenuProps {
     pub on_toggle_camera: Callback<()>,
     pub on_input_level_change: Callback<u32>,
     pub on_output_level_change: Callback<u32>,
-    pub on_mic_device_change: Callback<&'static str>,
-    pub on_speaker_device_change: Callback<&'static str>,
-    pub on_camera_device_change: Callback<&'static str>,
+    pub on_mic_device_change: Callback<String>,
+    pub on_speaker_device_change: Callback<String>,
+    pub on_camera_device_change: Callback<String>,
     pub on_back: Callback<()>,
     pub on_join_room: Callback<()>,
     pub session_id: String,
-    pub on_handoff_complete: Callback<()>,
+    pub on_signaling_ready: Callback<(SignalingReadyResponse, SignalingIntent)>,
 }
 
 #[function_component]
@@ -47,7 +49,7 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
         let session_id = props.session_id.clone();
         let action_error = action_error.clone();
         let action_busy = action_busy.clone();
-        let on_handoff_complete = props.on_handoff_complete.clone();
+        let on_signaling_ready = props.on_signaling_ready.clone();
         Callback::from(move |_| {
             if *action_busy {
                 return;
@@ -57,10 +59,10 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
             let session_id = session_id.clone();
             let action_error = action_error.clone();
             let action_busy = action_busy.clone();
-            let on_handoff_complete = on_handoff_complete.clone();
+            let on_signaling_ready = on_signaling_ready.clone();
             spawn_local(async move {
                 match connector_api::create(&session_id).await {
-                    Ok(_response) => on_handoff_complete.emit(()),
+                    Ok(response) => on_signaling_ready.emit((response, SignalingIntent::Create)),
                     Err(err) => action_error.set(Some(err)),
                 }
                 action_busy.set(false);
@@ -137,9 +139,9 @@ pub fn MainMenu(props: &MainMenuProps) -> Html {
                     on_toggle_camera={props.on_toggle_camera.clone()}
                     on_input_level_change={props.on_input_level_change.clone()}
                     on_output_level_change={props.on_output_level_change.clone()}
-                    selected_mic_device_id={props.settings_state.mic_device_id}
-                    selected_speaker_device_id={props.settings_state.speaker_device_id}
-                    selected_camera_device_id={props.settings_state.camera_device_id}
+                    selected_mic_device_id={props.settings_state.mic_device_id.clone()}
+                    selected_speaker_device_id={props.settings_state.speaker_device_id.clone()}
+                    selected_camera_device_id={props.settings_state.camera_device_id.clone()}
                     on_mic_device_change={props.on_mic_device_change.clone()}
                     on_speaker_device_change={props.on_speaker_device_change.clone()}
                     on_camera_device_change={props.on_camera_device_change.clone()}

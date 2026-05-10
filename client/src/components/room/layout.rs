@@ -21,6 +21,8 @@ pub const GRID_ROWS: usize = 2;
 pub const TILES_PER_PAGE: usize = GRID_COLS * GRID_ROWS;
 /// Width reserved for one paging-arrow button (including its gap to the viewport).
 const ARROW_SLOT_PX: f64 = 48.0;
+/// Penalizes extra rows when a flatter layout still gives reasonably sized tiles.
+const ROW_COUNT_SCORE_PENALTY: f64 = 1.35;
 
 /// Computed geometry for one page of the participant grid.
 #[derive(Clone, Copy)]
@@ -64,6 +66,33 @@ fn tile_size_16_9_in_cell(cell_w: f64, cell_h: f64) -> (f64, f64) {
     (tw, th)
 }
 
+fn tile_size_for_grid(avail_w: f64, avail_h: f64, cols: usize, rows: usize) -> (f64, f64) {
+    let w_raw = ((avail_w - (cols - 1) as f64 * TILE_GAP_PX) / cols as f64).max(0.0);
+    let h_raw = ((avail_h - (rows - 1) as f64 * TILE_GAP_PX) / rows as f64).max(0.0);
+    let (base_w, _) = tile_size_16_9_in_cell(w_raw, h_raw);
+    let mut tile_w = (base_w * TILE_SIZE_BOOST).min(w_raw);
+    let mut tile_h = tile_w / TILE_ASPECT_W_OVER_H;
+    if tile_h > h_raw {
+        tile_h = h_raw;
+        tile_w = tile_h * TILE_ASPECT_W_OVER_H;
+    }
+    (tile_w, tile_h)
+}
+
+fn single_page_layout_score(
+    cols: usize,
+    rows: usize,
+    count: usize,
+    tile_w: f64,
+    tile_h: f64,
+) -> f64 {
+    let slots = cols * rows;
+    let slot_fill = count as f64 / slots as f64;
+    let row_penalty = (rows as f64).powf(ROW_COUNT_SCORE_PENALTY);
+
+    tile_w * tile_h * slot_fill / row_penalty
+}
+
 /// Returns the usable content-box size (in logical pixels) inside `.room-page__tiles-wrap`.
 pub fn tiles_wrap_content_wh(client_w: i32, client_h: i32) -> (f64, f64) {
     let w = (client_w as f64 - TILE_WRAP_PAD_X).max(0.0);
@@ -79,8 +108,8 @@ pub fn tiles_wrap_content_wh(client_w: i32, client_h: i32) -> (f64, f64) {
 /// individual tile area for `total` participants on a single page.
 fn best_single_page_layout(avail_w: f64, avail_h: f64, total: usize) -> ParticipantLayout {
     let count = total.max(1);
-    let aw = avail_w.max(200.0);
-    let ah = avail_h.max(120.0);
+    let aw = avail_w.max(0.0);
+    let ah = avail_h.max(0.0);
 
     let mut best: Option<(usize, usize, f64, f64, f64)> = None;
     for rows in 1..=GRID_ROWS {
@@ -88,19 +117,8 @@ fn best_single_page_layout(avail_w: f64, avail_h: f64, total: usize) -> Particip
             if cols * rows < count {
                 continue;
             }
-            let w_raw = (aw - (cols - 1) as f64 * TILE_GAP_PX) / cols as f64;
-            let h_raw = (ah - (rows - 1) as f64 * TILE_GAP_PX) / rows as f64;
-            if w_raw <= 0.0 || h_raw <= 0.0 {
-                continue;
-            }
-            let (base_w, _) = tile_size_16_9_in_cell(w_raw, h_raw);
-            let mut tile_w = (base_w * TILE_SIZE_BOOST).min(w_raw);
-            let mut tile_h = tile_w / TILE_ASPECT_W_OVER_H;
-            if tile_h > h_raw {
-                tile_h = h_raw;
-                tile_w = tile_h * TILE_ASPECT_W_OVER_H;
-            }
-            let score = tile_w * tile_h;
+            let (tile_w, tile_h) = tile_size_for_grid(aw, ah, cols, rows);
+            let score = single_page_layout_score(cols, rows, count, tile_w, tile_h);
             let slots = cols * rows;
             match best {
                 None => best = Some((cols, rows, tile_w, tile_h, score)),
@@ -142,17 +160,9 @@ fn paged_grid_layout(avail_w: f64, avail_h: f64, total: usize) -> ParticipantLay
         return best_single_page_layout(avail_w, avail_h, total);
     }
 
-    let aw = avail_w.max(200.0);
-    let ah = avail_h.max(120.0);
-    let w_raw = (aw - (GRID_COLS - 1) as f64 * TILE_GAP_PX) / GRID_COLS as f64;
-    let h_raw = (ah - (GRID_ROWS - 1) as f64 * TILE_GAP_PX) / GRID_ROWS as f64;
-    let (base_w, _) = tile_size_16_9_in_cell(w_raw, h_raw);
-    let mut tile_w = (base_w * TILE_SIZE_BOOST).min(w_raw);
-    let mut tile_h = tile_w / TILE_ASPECT_W_OVER_H;
-    if tile_h > h_raw {
-        tile_h = h_raw;
-        tile_w = tile_h * TILE_ASPECT_W_OVER_H;
-    }
+    let aw = avail_w.max(0.0);
+    let ah = avail_h.max(0.0);
+    let (tile_w, tile_h) = tile_size_for_grid(aw, ah, GRID_COLS, GRID_ROWS);
 
     ParticipantLayout {
         cols: GRID_COLS,
@@ -173,8 +183,8 @@ pub fn resolve_participant_layout(
 ) -> (ParticipantLayout, bool) {
     let vw = viewport_w.max(0.0);
     let vh = viewport_h.max(0.0);
-    let fw = vw.max(360.0);
-    let fh = vh.max(220.0);
+    let fw = vw.max(0.0);
+    let fh = vh.max(0.0);
 
     if total == 0 {
         return (paged_grid_layout(fw, fh, 1), false);
@@ -184,7 +194,7 @@ pub fn resolve_participant_layout(
     let layout = if probe.page_count <= 1 {
         paged_grid_layout(fw, fh, total)
     } else {
-        let inner_w = (vw - 2.0 * ARROW_SLOT_PX).max(200.0);
+        let inner_w = (vw - 2.0 * ARROW_SLOT_PX).max(0.0);
         paged_grid_layout(inner_w, fh, total)
     };
 

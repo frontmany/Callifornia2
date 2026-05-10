@@ -12,7 +12,7 @@ const INSTANCE_LOAD_KEY: &str = "signaling:instance_load";
 const SIGNALING_NODES_KEY: &str = "signaling:nodes";
 const SESSION_PREFIX: &str = "signaling:session:";
 const NICK_PREFIX: &str = "signaling:nick:";
-const ROOM_BINDING_PREFIX: &str = "room_manager:room:";
+const ROOM_BINDING_PREFIX: &str = "room:";
 
 const COMPARE_AND_DEL_LUA: &str = r#"
 if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -136,7 +136,6 @@ pub async fn session_create(
         let key = session_key(session_id);
         let _: usize = conn.hset(&key, "nickname", nickname).await?;
         let _: usize = conn.hset(&key, "room_id", "").await?;
-        let _: usize = conn.hset(&key, "pending_room_id", "").await?;
         let _: bool = conn.expire(&key, ttl.as_secs() as i64).await?;
         Ok(())
     })
@@ -152,7 +151,10 @@ pub async fn session_delete(client: &Client, session_id: &str) -> Result<(), Red
     .await
 }
 
-pub async fn session_get(client: &Client, session_id: &str) -> Result<Option<SessionData>, RedisError> {
+pub async fn session_get(
+    client: &Client,
+    session_id: &str,
+) -> Result<Option<SessionData>, RedisError> {
     with_op_timeout(async move {
         let mut conn = client.get_connection_manager().await?;
         let key = session_key(session_id);
@@ -238,7 +240,11 @@ pub async fn get_supervisor_status(
 ) -> Result<Option<control_store::models::SupervisorStatus>, RedisError> {
     control_store::storage::read_supervisor_status(client)
         .await
-        .map_err(|e| RedisError::Redis(redis::RedisError::from(std::io::Error::other(e.to_string()))))
+        .map_err(|e| {
+            RedisError::Redis(redis::RedisError::from(std::io::Error::other(
+                e.to_string(),
+            )))
+        })
 }
 
 async fn connect_redis(client: &Client, connect_timeout: Duration) -> Result<ConnectionManager> {

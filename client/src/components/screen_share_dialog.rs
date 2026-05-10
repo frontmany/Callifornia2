@@ -152,7 +152,5 @@ pub fn ScreenShareDialog(props: &ScreenShareDialogProps) -> Html {
 fn thumb_preview_style(width_px: u32, height_px: u32) -> String {
     let w = width_px.max(1);
     let h = height_px.max(1);
-    format!(
-        "width: min(100%, calc(220px * {w} / {h})); aspect-ratio: {w} / {h}; height: auto;",
-    )
+    format!("width: min(100%, calc(220px * {w} / {h})); aspect-ratio: {w} / {h}; height: auto;",)
 }

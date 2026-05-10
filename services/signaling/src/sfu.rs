@@ -259,10 +259,7 @@ impl Registry {
         )?;
 
         if let Some(u) = new_ufrag {
-            self.last_offer_ice_ufrag
-                .write()
-                .await
-                .insert(peer_key, u);
+            self.last_offer_ice_ufrag.write().await.insert(peer_key, u);
         }
 
         Ok(RemoteSdp {
