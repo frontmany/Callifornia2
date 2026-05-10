@@ -11,6 +11,8 @@ use crate::app::SettingsState;
 use crate::components::{ScreenShareDialog, SettingsPanel};
 use crate::screen_share_pick::{self, ScreenShareSource};
 use crate::theme::Theme;
+use gloo_timers::future::TimeoutFuture;
+use js_sys::Reflect;
 use layout::{
     ParticipantLayout, TILE_ASPECT_W_OVER_H, TILE_GAP_PX, resolve_participant_layout,
     tiles_wrap_content_wh,
@@ -53,6 +55,10 @@ pub struct RoomProps {
     pub on_mic_device_change: Callback<String>,
     pub on_speaker_device_change: Callback<String>,
     pub on_camera_device_change: Callback<String>,
+    pub on_screen_share_started: Callback<JsValue>,
+    pub on_screen_share_stopped: Callback<()>,
+    pub on_screen_share_error: Callback<String>,
+    pub on_media_error: Callback<String>,
     pub on_end_call: Callback<()>,
     /// Set to `true` when another participant is presenting; triggers the same
     /// screen-share layout as a local presentation.
@@ -62,6 +68,12 @@ pub struct RoomProps {
     /// Pass each [`web_sys::MediaStream`] as [`JsValue`] (see [`media_stream_js`]).
     #[prop_or_default]
     pub participant_media: Vec<Option<JsValue>>,
+    #[prop_or_default]
+    pub remote_presentation_media: Option<JsValue>,
+    #[prop_or_default]
+    pub remote_presentation_owner: Option<String>,
+    #[prop_or_default]
+    pub media_error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +176,8 @@ pub fn Room(props: &RoomProps) -> Html {
     let participant_count = props.participants.len();
     let (vw, vh) = *tile_area_wh;
     let (layout, show_arrows_grid) = resolve_participant_layout(vw, vh, participant_count);
-    let presentation = *screen_sharing || props.remote_presentation_active;
+    let presentation =
+        *screen_sharing || props.remote_presentation_active || props.remote_presentation_media.is_some();
 
     let rail_page_count = participant_count
         .saturating_sub(1)
@@ -255,11 +268,13 @@ pub fn Room(props: &RoomProps) -> Html {
         let screen_sharing = screen_sharing.clone();
         let screen_share_stream = screen_share_stream.clone();
         let open_screen_share_dialog = open_screen_share_dialog.clone();
+        let on_screen_share_stopped = props.on_screen_share_stopped.clone();
         Callback::from(move |_| {
             if *screen_sharing {
                 if let Some(stream) = screen_share_stream.as_ref() {
                     screen_share_pick::stop_media_stream_tracks(stream);
                 }
+                on_screen_share_stopped.emit(());
                 screen_share_stream.set(None);
                 screen_sharing.set(false);
             } else {
@@ -272,18 +287,23 @@ pub fn Room(props: &RoomProps) -> Html {
         let screen_sharing = screen_sharing.clone();
         let screen_share_stream = screen_share_stream.clone();
         let screen_share_dialog_open = screen_share_dialog_open.clone();
+        let on_screen_share_started = props.on_screen_share_started.clone();
+        let on_screen_share_error = props.on_screen_share_error.clone();
         Callback::from(move |source_id: String| {
             let screen_sharing = screen_sharing.clone();
             let screen_share_stream = screen_share_stream.clone();
             let dialog_open = screen_share_dialog_open.clone();
+            let started = on_screen_share_started.clone();
+            let error = on_screen_share_error.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match screen_share_pick::start_system_screen_share_for_stream(&source_id).await {
                     Ok(stream) => {
+                        started.emit(stream.clone());
                         screen_share_stream.set(Some(stream));
                         screen_sharing.set(true);
                         dialog_open.set(false);
                     }
-                    Err(_) => {}
+                    Err(err) => error.emit(err),
                 }
             });
         })
@@ -329,9 +349,55 @@ pub fn Room(props: &RoomProps) -> Html {
 
     let stage_caption = if *screen_sharing {
         "Your screen"
+    } else if let Some(owner) = props.remote_presentation_owner.as_ref() {
+        owner.as_str()
     } else {
         "Shared screen"
     };
+    let stage_media = if *screen_sharing {
+        (*screen_share_stream).clone()
+    } else {
+        props.remote_presentation_media.clone()
+    };
+
+    // Глобальная громкость динамиков: один коэффициент на все `<video>` в области звонка
+    // (участники + screen share), без отдельной «громкости на участника».
+    {
+        let wrap = tiles_wrap_ref.clone();
+        let output_level = props.settings_state.output_level;
+        let speaker_device_id = props.settings_state.speaker_device_id.clone();
+        let on_media_error = props.on_media_error.clone();
+        let media_mask: Vec<bool> = props.participant_media.iter().map(|m| m.is_some()).collect();
+        let screen_sharing_on = *screen_sharing;
+        let screen_share_on = (*screen_share_stream).is_some();
+        let remote_screen_on = props.remote_presentation_media.is_some();
+        use_effect_with(
+            (
+                output_level,
+                speaker_device_id,
+                media_mask,
+                screen_sharing_on,
+                screen_share_on,
+                remote_screen_on,
+            ),
+            move |(level, speaker, _, _, _, _)| {
+                let wrap = wrap.clone();
+                let level = *level;
+                let speaker = speaker.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    TimeoutFuture::new(0).await;
+                    if let Some(el) = wrap.cast::<web_sys::Element>() {
+                        if let Some(err) =
+                            apply_global_output_audio_settings(&el, level, &speaker).await
+                        {
+                            on_media_error.emit(err);
+                        }
+                    }
+                });
+                || {}
+            },
+        );
+    }
 
     // ---------------------------------------------------------------------------
     // Render.
@@ -386,7 +452,7 @@ pub fn Room(props: &RoomProps) -> Html {
                             &props.participants[start..end],
                             start,
                             props.participant_media.as_slice(),
-                            (*screen_share_stream).clone(),
+                            stage_media.clone(),
                             rail_cluster_style,
                             rail_tile_h,
                             show_arrows,
@@ -394,6 +460,7 @@ pub fn Room(props: &RoomProps) -> Html {
                             page_count,
                             on_page_prev.clone(),
                             on_page_next.clone(),
+                            props.your_nickname.as_str(),
                         ) }
                     } else {
                         { view_tiles(
@@ -406,6 +473,7 @@ pub fn Room(props: &RoomProps) -> Html {
                             page,
                             on_page_prev.clone(),
                             on_page_next.clone(),
+                            props.your_nickname.as_str(),
                         ) }
                     }
                 </div>
@@ -513,6 +581,12 @@ pub fn Room(props: &RoomProps) -> Html {
             </main>
 
             // ── Overlays ──────────────────────────────────────────────────────
+            if let Some(error) = props.media_error.as_ref() {
+                <div class="room-page__media-warning" role="status" aria-live="polite">
+                    { error.clone() }
+                </div>
+            }
+
             if *screen_share_dialog_open {
                 <ScreenShareDialog
                     sources={(*screen_share_sources).clone()}
@@ -551,6 +625,70 @@ pub fn Room(props: &RoomProps) -> Html {
 // Sub-view helpers.
 // ---------------------------------------------------------------------------
 
+fn playback_volume(output_level: u32) -> f64 {
+    (output_level.min(100) as f64 / 100.0).clamp(0.0, 1.0)
+}
+
+async fn apply_global_output_audio_settings(
+    container: &web_sys::Element,
+    output_level: u32,
+    speaker_device_id: &str,
+) -> Option<String> {
+    let vol = playback_volume(output_level);
+    let sink_id = speaker_device_id.trim();
+    let Ok(list) = container.query_selector_all("video") else {
+        return None;
+    };
+    let mut sink_error = None;
+    for i in 0..list.length() {
+        if let Some(node) = list.item(i) {
+            if let Ok(video) = node.dyn_into::<HtmlVideoElement>() {
+                let _ = Reflect::set(
+                    &video,
+                    &JsValue::from_str("volume"),
+                    &JsValue::from_f64(vol),
+                );
+                if !sink_id.is_empty() && !sink_id.eq_ignore_ascii_case("default") {
+                    if let Err(err) = set_media_sink_id(&video, sink_id).await {
+                        sink_error.get_or_insert(err);
+                    }
+                }
+            }
+        }
+    }
+    sink_error
+}
+
+async fn set_media_sink_id(video: &HtmlVideoElement, sink_id: &str) -> Result<(), String> {
+    let set_sink = Reflect::get(video, &JsValue::from_str("setSinkId"))
+        .map_err(js_error_to_string)?
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| "Audio output device selection is not supported by this browser.".to_owned())?;
+    let out = set_sink
+        .call1(video, &JsValue::from_str(sink_id))
+        .map_err(js_error_to_string)?;
+    if let Ok(promise) = out.dyn_into::<js_sys::Promise>() {
+        JsFuture::from(promise).await.map_err(js_error_to_string)?;
+    }
+    Ok(())
+}
+
+fn js_error_to_string(value: JsValue) -> String {
+    let name = Reflect::get(&value, &JsValue::from_str("name"))
+        .ok()
+        .and_then(|v| v.as_string());
+    let message = Reflect::get(&value, &JsValue::from_str("message"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .or_else(|| value.as_string());
+    match (name, message) {
+        (Some(name), Some(message)) if !message.is_empty() => format!("{name}: {message}"),
+        (Some(name), _) => name,
+        (_, Some(message)) => message,
+        _ => "Browser media operation failed.".to_owned(),
+    }
+}
+
 /// Renders the normal participant grid with optional paging arrows.
 #[allow(clippy::too_many_arguments)]
 fn view_tiles(
@@ -563,6 +701,7 @@ fn view_tiles(
     page: usize,
     on_prev: Callback<()>,
     on_next: Callback<()>,
+    your_nickname: &str,
 ) -> Html {
     html! {
         <section class="room-page__tiles-wrap" aria-label="Participants">
@@ -583,6 +722,7 @@ fn view_tiles(
                         { for participants.iter().enumerate().map(|(i, name)| {
                             let global_i = range_start + i;
                             let media = participant_media.get(global_i).cloned().flatten();
+                            let is_self = name.as_str() == your_nickname;
                             html! {
                                 <ParticipantTile
                                     name={name.clone()}
@@ -590,6 +730,7 @@ fn view_tiles(
                                     width_px={layout.tile_width}
                                     height_px={layout.tile_height}
                                     rail={false}
+                                    mute_audio={is_self}
                                 />
                             }
                         }) }
@@ -669,6 +810,7 @@ fn view_presentation(
     page_count: usize,
     on_prev: Callback<()>,
     on_next: Callback<()>,
+    your_nickname: &str,
 ) -> Html {
     html! {
         <div class="room-page__presentation-main">
@@ -699,6 +841,7 @@ fn view_presentation(
                             { for participants.iter().enumerate().map(|(i, name)| {
                                 let global_i = range_start + i;
                                 let media = participant_media.get(global_i).cloned().flatten();
+                                let is_self = name.as_str() == your_nickname;
                                 html! {
                                     <ParticipantTile
                                         name={name.clone()}
@@ -706,6 +849,7 @@ fn view_presentation(
                                         width_px={RAIL_TILE_W_PX}
                                         height_px={rail_tile_h}
                                         rail={true}
+                                        mute_audio={is_self}
                                     />
                                 }
                             }) }

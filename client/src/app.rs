@@ -8,7 +8,7 @@ use crate::signaling::{
     RoomSnapshot, ServerErrorCode, SignalingClient, SignalingEvent, SignalingIntent, SignalingStart,
 };
 use crate::theme::Theme;
-use crate::webrtc_room::WebRtcRoomSession;
+use crate::webrtc_room::{RemoteParticipantMedia, WebRtcMediaError, WebRtcRoomSession};
 
 use gloo_timers::callback::Interval;
 use wasm_bindgen::closure::Closure;
@@ -35,10 +35,15 @@ pub fn App() -> Html {
     let signaling_client = use_mut_ref(|| Option::<SignalingClient>::None);
     let active_room = use_state(|| Option::<ActiveRoom>::None);
     let app_error = use_state(|| Option::<String>::None);
+    let media_error = use_state(|| Option::<String>::None);
     // WebRTC session (non-reactive; lifecycle follows active_room).
     let webrtc_session = use_mut_ref(|| Option::<WebRtcRoomSession>::None);
-    // Remote streams keyed by MediaStream.id; updates trigger Room re-render.
-    let remote_streams = use_state(|| HashMap::<String, JsValue>::new());
+    // Skip one `apply_local_media` run right after `WebRtcRoomSession::start` (initial capture).
+    let skip_media_apply = use_mut_ref(|| false);
+    // Bumped after local media refresh so `Room` re-reads `local_stream()`.
+    let local_media_rev = use_state(|| 0_u64);
+    // Remote streams keyed by publisher nickname; updates trigger Room re-render.
+    let remote_streams = use_state(|| HashMap::<String, RemoteParticipantMedia>::new());
 
     {
         let theme = settings_state.theme;
@@ -69,6 +74,7 @@ pub fn App() -> Html {
         let signaling_start = signaling_start.clone();
         let active_room = active_room.clone();
         let app_error = app_error.clone();
+        let media_error = media_error.clone();
         Callback::from(move |new_session_id: String| {
             session_id.set(Some(new_session_id));
             handoff_complete.set(false);
@@ -76,6 +82,7 @@ pub fn App() -> Html {
             signaling_start.set(None);
             active_room.set(None);
             app_error.set(None);
+            media_error.set(None);
             screen.set(AppScreen::MainMenu);
         })
     };
@@ -151,6 +158,7 @@ pub fn App() -> Html {
         let active_room = active_room.clone();
         let handoff_complete = handoff_complete.clone();
         let app_error = app_error.clone();
+        let media_error = media_error.clone();
         Callback::from(move |_| {
             session_id.set(None);
             signaling_ws_connected.set(false);
@@ -158,6 +166,7 @@ pub fn App() -> Html {
             active_room.set(None);
             handoff_complete.set(false);
             app_error.set(None);
+            media_error.set(None);
             screen.set(AppScreen::Nickname);
         })
     };
@@ -175,6 +184,7 @@ pub fn App() -> Html {
         let active_room = active_room.clone();
         let signaling_client = signaling_client.clone();
         let app_error = app_error.clone();
+        let media_error = media_error.clone();
         Callback::from(move |_| {
             if let Some(client) = signaling_client.borrow().as_ref() {
                 if let (Some(session), Some(room)) = ((*session_id).clone(), (*active_room).clone())
@@ -186,6 +196,7 @@ pub fn App() -> Html {
             active_room.set(None);
             signaling_ws_connected.set(false);
             app_error.set(None);
+            media_error.set(None);
             screen.set(AppScreen::MainMenu);
         })
     };
@@ -211,6 +222,7 @@ pub fn App() -> Html {
         let handoff_complete = handoff_complete.clone();
         let app_error = app_error.clone();
         let webrtc_session = webrtc_session.clone();
+        let media_error = media_error.clone();
         use_effect_with(start, move |start| {
             *client_ref.borrow_mut() = None;
 
@@ -222,6 +234,7 @@ pub fn App() -> Html {
                     let handoff_complete = handoff_complete.clone();
                     let app_error = app_error.clone();
                     let webrtc_session = webrtc_session.clone();
+                    let media_error = media_error.clone();
                     Callback::from(move |event: SignalingEvent| match event {
                         SignalingEvent::Connected => {
                             signaling_ws_connected.set(true);
@@ -242,6 +255,7 @@ pub fn App() -> Html {
                         SignalingEvent::RoomReady(snapshot) => {
                             active_room.set(Some(ActiveRoom::from(snapshot)));
                             app_error.set(None);
+                            media_error.set(None);
                             screen.set(AppScreen::Room);
                         }
                         SignalingEvent::ParticipantJoined(nickname) => {
@@ -412,24 +426,35 @@ pub fn App() -> Html {
         let settings_snapshot = (*settings_state).clone();
         let webrtc_session = webrtc_session.clone();
         let remote_streams = remote_streams.clone();
+        let skip_media_apply_room = skip_media_apply.clone();
+        let media_error = media_error.clone();
         use_effect_with(webrtc_room_dep, move |room_id_opt| {
             if room_id_opt.is_some() {
                 let transport = signaling_client.borrow().as_ref().map(|c| c.transport());
                 if let Some(transport) = transport {
                     let remote_streams_cb = remote_streams.clone();
                     let on_streams =
-                        Callback::from(move |streams: HashMap<String, JsValue>| {
+                        Callback::from(move |streams: HashMap<String, RemoteParticipantMedia>| {
                             remote_streams_cb.set(streams);
                         });
+                    let media_error_cb = media_error.clone();
+                    let on_media_error = Callback::from(move |err: WebRtcMediaError| {
+                        media_error_cb.set(Some(err.message));
+                    });
                     match WebRtcRoomSession::start(
                         transport,
                         settings_snapshot.mic_enabled,
                         settings_snapshot.camera_enabled,
                         settings_snapshot.mic_device_id.clone(),
                         settings_snapshot.camera_device_id.clone(),
+                        settings_snapshot.input_level,
                         on_streams,
+                        on_media_error,
                     ) {
-                        Ok(session) => *webrtc_session.borrow_mut() = Some(session),
+                        Ok(session) => {
+                            *webrtc_session.borrow_mut() = Some(session);
+                            *skip_media_apply_room.borrow_mut() = true;
+                        }
                         Err(_) => {}
                     }
                 }
@@ -442,6 +467,61 @@ pub fn App() -> Html {
                 }
                 remote_streams.set(HashMap::new());
             }
+        });
+    }
+
+    // Re-acquire mic/camera when settings change during a call (replaceTrack / addTrack).
+    {
+        let media_settings_dep = (
+            (*active_room).as_ref().map(|r| r.room_id.clone()),
+            (*settings_state).mic_enabled,
+            (*settings_state).camera_enabled,
+            (*settings_state).mic_device_id.clone(),
+            (*settings_state).camera_device_id.clone(),
+        );
+        let webrtc_session = webrtc_session.clone();
+        let skip_media_apply = skip_media_apply.clone();
+        let local_media_rev = local_media_rev.clone();
+        let settings_state_apply = settings_state.clone();
+        use_effect_with(media_settings_dep, move |dep| {
+            let (room_key, mic, cam, mic_d, cam_d) = dep.clone();
+            let input_level = (*settings_state_apply).input_level;
+            if room_key.is_some() {
+                if *skip_media_apply.borrow() {
+                    *skip_media_apply.borrow_mut() = false;
+                } else if let Some(session) = webrtc_session.borrow().as_ref() {
+                    let rev = local_media_rev.clone();
+                    session.apply_local_media(
+                        mic,
+                        cam,
+                        mic_d,
+                        cam_d,
+                        input_level,
+                        Callback::from(move |_| {
+                            rev.set(*rev + 1);
+                        }),
+                    );
+                }
+            }
+            || {}
+        });
+    }
+
+    // Mic gain slider: update Web Audio GainNode without re-running getUserMedia.
+    {
+        let input_gain_dep = (
+            (*active_room).as_ref().map(|r| r.room_id.clone()),
+            (*settings_state).input_level,
+        );
+        let webrtc_session = webrtc_session.clone();
+        use_effect_with(input_gain_dep, move |dep| {
+            let (room_key, input_level) = dep.clone();
+            if room_key.is_some() {
+                if let Some(session) = webrtc_session.borrow().as_ref() {
+                    session.set_input_level(input_level);
+                }
+            }
+            || {}
         });
     }
 
@@ -487,22 +567,12 @@ pub fn App() -> Html {
             },
             AppScreen::Room => {
                 if let Some(room) = (*active_room).clone() {
-                    // Build participant_media in participant list order.
-                    // Local stream goes to the slot for your_nickname; remote streams
-                    // are assigned to other participants by arrival order (i-th remote
-                    // stream → i-th non-self participant). This works exactly for
-                    // 2-person calls and approximately for larger rooms until the SFU
-                    // encodes per-sender stream IDs in signaling metadata.
+                    let _ = *local_media_rev;
+                    // `remote_streams`: nickname → composite remote MediaStream (from SFU relay
+                    // track ids `nickname|…` parsed in `webrtc_room`).
                     let streams_snapshot = (*remote_streams).clone();
                     let local_js: Option<JsValue> =
                         webrtc_session.borrow().as_ref().and_then(|s| s.local_stream());
-                    let remote_stream_list: Vec<JsValue> =
-                        streams_snapshot.values().cloned().collect();
-                    let other_nicks: Vec<&String> = room
-                        .participants
-                        .iter()
-                        .filter(|n| *n != &room.your_nickname)
-                        .collect();
                     let participant_media: Vec<Option<JsValue>> = room
                         .participants
                         .iter()
@@ -510,14 +580,57 @@ pub fn App() -> Html {
                             if nick == &room.your_nickname {
                                 local_js.clone()
                             } else {
-                                let idx = other_nicks
-                                    .iter()
-                                    .position(|n| *n == nick)
-                                    .unwrap_or(0);
-                                remote_stream_list.get(idx).cloned()
+                                streams_snapshot.get(nick).and_then(|media| media.camera.clone())
                             }
                         })
                         .collect();
+                    let remote_presentation = room
+                        .participants
+                        .iter()
+                        .filter(|nick| *nick != &room.your_nickname)
+                        .find_map(|nick| {
+                            streams_snapshot
+                                .get(nick)
+                                .and_then(|media| media.screen.clone())
+                                .map(|stream| (nick.clone(), stream))
+                        });
+                    let remote_presentation_owner = remote_presentation
+                        .as_ref()
+                        .map(|(owner, _)| owner.clone());
+                    let remote_presentation_media = remote_presentation.map(|(_, stream)| stream);
+                    let on_screen_share_started = {
+                        let webrtc_session = webrtc_session.clone();
+                        let rev = local_media_rev.clone();
+                        Callback::from(move |stream: JsValue| {
+                            if let Some(session) = webrtc_session.borrow().as_ref() {
+                                let rev = rev.clone();
+                                session.publish_screen_share(
+                                    stream,
+                                    Callback::from(move |_| rev.set(*rev + 1)),
+                                );
+                            }
+                        })
+                    };
+                    let on_screen_share_stopped = {
+                        let webrtc_session = webrtc_session.clone();
+                        let rev = local_media_rev.clone();
+                        Callback::from(move |_| {
+                            if let Some(session) = webrtc_session.borrow().as_ref() {
+                                let rev = rev.clone();
+                                session.stop_screen_share(Callback::from(move |_| {
+                                    rev.set(*rev + 1)
+                                }));
+                            }
+                        })
+                    };
+                    let on_screen_share_error = {
+                        let media_error = media_error.clone();
+                        Callback::from(move |message: String| media_error.set(Some(message)))
+                    };
+                    let on_media_error = {
+                        let media_error = media_error.clone();
+                        Callback::from(move |message: String| media_error.set(Some(message)))
+                    };
 
                     html! {
                         <Room
@@ -525,6 +638,9 @@ pub fn App() -> Html {
                             your_nickname={room.your_nickname}
                             participants={room.participants}
                             participant_media={participant_media}
+                            remote_presentation_media={remote_presentation_media}
+                            remote_presentation_owner={remote_presentation_owner}
+                            media_error={(*media_error).clone()}
                             settings_state={(*settings_state).clone()}
                             on_theme_change={on_theme.clone()}
                             on_toggle_mic={on_toggle_mic.clone()}
@@ -534,6 +650,10 @@ pub fn App() -> Html {
                             on_mic_device_change={on_mic_device_change.clone()}
                             on_speaker_device_change={on_speaker_device_change.clone()}
                             on_camera_device_change={on_camera_device_change.clone()}
+                            on_screen_share_started={on_screen_share_started}
+                            on_screen_share_stopped={on_screen_share_stopped}
+                            on_screen_share_error={on_screen_share_error}
+                            on_media_error={on_media_error}
                             on_end_call={on_back_to_main_menu.clone()}
                         />
                     }

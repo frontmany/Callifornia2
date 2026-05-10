@@ -16,6 +16,9 @@ pub struct ParticipantTileProps {
     pub height_px: f64,
     #[prop_or_default]
     pub rail: bool,
+    /// Local preview: `true` avoids echo; remote participants use `false` so audio plays.
+    /// Громкость воспроизведения задаётся глобально в [`super::Room`] для всех `<video>` сразу.
+    pub mute_audio: bool,
 }
 
 /// Wraps a [`MediaStream`](web_sys::MediaStream) for [`RoomProps::participant_media`](super::RoomProps::participant_media).
@@ -31,22 +34,27 @@ pub fn ParticipantTile(props: &ParticipantTileProps) -> Html {
     {
         let video_ref = video_ref.clone();
         let media = props.media.clone();
-        use_effect_with(media, move |media: &Option<JsValue>| {
-            if let Some(video_el) = video_ref.cast::<HtmlVideoElement>() {
-                match media
-                    .as_ref()
-                    .and_then(|j| j.clone().dyn_into::<web_sys::MediaStream>().ok())
-                {
-                    Some(ms) => {
-                        let _ = video_el.set_src_object(Some(&ms));
-                    }
-                    None => {
-                        let _ = video_el.set_src_object(None);
+        let mute_audio = props.mute_audio;
+        use_effect_with(
+            (media, mute_audio),
+            move |(media, mute_audio): &(Option<JsValue>, bool)| {
+                if let Some(video_el) = video_ref.cast::<HtmlVideoElement>() {
+                    let _ = video_el.set_muted(*mute_audio);
+                    match media
+                        .as_ref()
+                        .and_then(|j| j.clone().dyn_into::<web_sys::MediaStream>().ok())
+                    {
+                        Some(ms) => {
+                            let _ = video_el.set_src_object(Some(&ms));
+                        }
+                        None => {
+                            let _ = video_el.set_src_object(None);
+                        }
                     }
                 }
-            }
-            || ()
-        });
+                || ()
+            },
+        );
     }
 
     let label = truncate_str(&props.name, MAX_NAME_CHARS);
@@ -72,7 +80,7 @@ pub fn ParticipantTile(props: &ParticipantTileProps) -> Html {
                     class="room-page__tile-video"
                     autoplay=true
                     playsinline=true
-                    muted=true
+                    muted={props.mute_audio}
                     aria-label={format!("{} camera", props.name)}
                 />
             }

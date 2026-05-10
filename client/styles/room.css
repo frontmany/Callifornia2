@@ -53,6 +53,22 @@
     gap: 10px;
 }
 
+.room-page__media-warning {
+    position: fixed;
+    top: 76px;
+    left: 50%;
+    z-index: 45;
+    max-width: min(640px, calc(100vw - 32px));
+    transform: translateX(-50%);
+    border-radius: 14px;
+    background: rgba(24, 24, 27, 0.86);
+    color: #fff;
+    padding: 10px 14px;
+    font-size: 13px;
+    line-height: 1.35;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.22);
+}
+
 .room-page__icon-btn {
     width: 40px;
     height: 40px;

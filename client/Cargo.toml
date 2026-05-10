@@ -13,7 +13,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3.97", features = [
-  "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "Event", "EventTarget",
+  "Clipboard", "CloseEvent", "console", "Document", "Element", "ErrorEvent", "Event", "EventTarget",
   "HtmlElement", "HtmlFormElement", "HtmlInputElement", "HtmlMediaElement", "HtmlVideoElement",
   "KeyboardEvent", "MediaDevices", "MediaQueryList", "MediaStream", "MediaStreamConstraints",
   "MediaStreamTrack", "MessageEvent", "Navigator", "ResizeObserver",
