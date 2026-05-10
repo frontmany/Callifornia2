@@ -8,13 +8,15 @@ Real-time calling stack: **Rust** services for routing, sessions, and HTTP/WebSo
 
 | Component | Role |
 |-----------|------|
-| **connector** | Public edge: REST API for clients, JWT/session handoff, Redis-backed coordination. Routes users to a **signaling** instance. |
-| **signaling** | Core call signaling: WebRTC SDP/ICE exchange with clients, talks to **room_manager** (gRPC) for rooms and SFU allocation, and to **SFU** (gRPC, `proto/signaling.proto`) for peer lifecycle and media plane control. |
-| **room_manager** | gRPC control plane: room state, SFU pool / provisioning hints (`ROOM_MANAGER_SFU_CANDIDATES`), health checks against SFU instances. Uses **Redis** as shared storage. |
+| **connector** (`services/connector`) | Public edge: REST API for clients, JWT/session handoff, Redis-backed coordination. Routes users to a **signaling** instance and checks supervisor liveness before `/create`. |
+| **signaling** (`services/signaling`) | Core call signaling: WebRTC SDP/ICE exchange with clients, talks to **room_manager** (gRPC) for rooms and SFU allocation, and to **SFU** (gRPC, `common/proto/signaling.proto`) for peer lifecycle and media plane control. |
+| **room_manager** (`services/room_manager`) | gRPC control plane: room state, SFU pool / provisioning hints (`ROOM_MANAGER_SFU_CANDIDATES`). Uses **Redis** as shared storage. |
+| **supervisor** (`services/supervisor`) | Central health watchdog and janitor for Redis/signaling/room_manager/SFU reconciliation. |
+| **control_store** (`common/control_store`) | Shared Rust library with Redis keys, models, and storage helpers. |
 | **sfu** (`sfu/`) | C++ executable: **libdatachannel** WebRTC stack, exposes **SFUService** over gRPC (same protos as Rust). |
-| **Redis** | Required external dependency: shared state and leases across connector, signaling, and room_manager. |
+| **Redis** | Required external dependency: shared state and leases across services. |
 
-Protobuf definitions live under [`proto/`](proto/). The SFU CMake build generates C++ stubs from `proto/signaling.proto`; Rust crates use `tonic-prost-build` with a vendored `protoc` (no system `protoc` required for Rust).
+Protobuf definitions live under [`common/proto/`](common/proto/). The SFU CMake build generates C++ stubs from `common/proto/signaling.proto`; Rust crates use `tonic-prost-build` with a vendored `protoc` (no system `protoc` required for Rust).
 
 ---
 
@@ -91,23 +93,47 @@ Environment at runtime: **`SFU_GRPC_ADDR`** — bind address for the SFU gRPC se
 There is **no** workspace `Cargo.toml` at the repo root; build each crate separately from its directory:
 
 ```bash
-cd connector && cargo build --release && cd ..
-cd signaling && cargo build --release && cd ..
-cd room_manager && cargo build --release && cd ..
+cd common/control_store      && cargo build --release && cd ../..
+cd services/connector        && cargo build --release && cd ../..
+cd services/signaling        && cargo build --release && cd ../..
+cd services/room_manager     && cargo build --release && cd ../..
+cd services/supervisor       && cargo build --release && cd ../..
 ```
 
-`protoc` is supplied by **`protoc-bin-vendored`** in `signaling` and `room_manager` builds—no extra install step for codegen.
+`protoc` is supplied by **`protoc-bin-vendored`** — no extra install step for codegen.
+
+`control_store` is a pure-library crate (no binary) and must be built before the crates that depend on it (`connector`, `supervisor`).  `signaling` and `room_manager` do not depend on it at compile time.
 
 ---
 
 ## Configuration and local run order
 
 1. Start **Redis** on the URL used in the `.env` files (default `127.0.0.1:6379`).
-2. Copy or symlink env files: each service reads **`.env`** from its own crate directory ([`connector/.env`](connector/.env), [`signaling/.env`](signaling/.env), [`room_manager/.env`](room_manager/.env)).
-3. Set **`ROOM_MANAGER_SFU_CANDIDATES`** in `room_manager` so it lists your SFU gRPC endpoint(s), e.g. `local|http://127.0.0.1:50051|200` (format: `id|http(s)://host:port|max_rooms`; see comments in `room_manager/.env`).
-4. Start **room_manager**, then the **sfu** binary, then **signaling**, then **connector** (connector must list signaling WebSocket URLs in **`SIGNALING_INSTANCES`** — see `connector/.env`).
+2. Copy or symlink env files: each service reads **`.env`** from its own crate directory.
+3. Set **`ROOM_MANAGER_SFU_CANDIDATES`** in `room_manager` so it lists your SFU gRPC endpoint(s), e.g. `local|http://127.0.0.1:50051|200` (format: `id|http(s)://host:port|max_rooms`).
+4. Start **room_manager**, then the **sfu** binary, then **signaling** instances.
+5. Start **supervisor** — it must be running before new rooms can be created.  Set `SIGNALING_ADMIN_INSTANCES` to a comma-separated list of `node_id|http://host:admin_port` pairs (one per signaling instance), and `ROOM_MANAGER_GRPC_ADDR` to the room_manager address.
+6. Start **connector** last (it reads `SIGNALING_INSTANCES` for routing and checks supervisor liveness via Redis).
 
 Align **`CONNECTOR_TOKEN_SECRET`** between connector and signaling so issued tokens validate.
+
+### New supervisor env vars
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SIGNALING_ADMIN_INSTANCES` | _(empty)_ | Comma-separated `node_id\|http://host:port` per signaling node |
+| `SUPERVISOR_PROBE_INTERVAL_MS` | `2000` | How often probes tick |
+| `SUPERVISOR_PROBE_TIMEOUT_MS` | `1000` | Timeout for a single probe RPC |
+| `JANITOR_INTERVAL_SEC` | `5` | Janitor reconciliation interval |
+| `SIGNALING_STALE_SEC` | `30` | Seconds after last heartbeat before a node is reclaimed |
+| `SUPERVISOR_STALE_SEC` | `30` | Max age of `supervisor:heartbeat` accepted by connector |
+| `SUPERVISOR_INSTANCE_ID` | _(random UUID)_ | Written into `supervisor:heartbeat` |
+
+### New signaling env var
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SIGNALING_ADMIN_GRPC_ADDR` | `0.0.0.0:50071` | Bind address for the internal admin gRPC server |
 
 ---
 
@@ -124,9 +150,14 @@ Align **`CONNECTOR_TOKEN_SECRET`** between connector and signaling so issued tok
 ## Repository layout (high level)
 
 ```
-connector/       # Axum REST edge → signaling handoff
-signaling/       # WebSocket signaling + gRPC to room_manager & SFU
-room_manager/    # tonic gRPC server + Redis
-sfu/             # C++ SFU (CMake: gRPC + libdatachannel submodules)
-proto/           # Shared .proto files
+common/
+  proto/          # Shared .proto files (incl. signaling_admin.proto)
+  control_store/  # Shared Rust library: Redis keys, models, storage helpers
+services/
+  connector/      # Axum REST edge -> signaling handoff
+  signaling/      # WebSocket signaling + gRPC to room_manager & SFU + admin gRPC
+  room_manager/   # tonic gRPC server + Redis
+  supervisor/     # Health watchdog + janitor (replaces per-service loops)
+client/           # Rust client app
+sfu/              # C++ SFU (CMake: gRPC + libdatachannel submodules)
 ```

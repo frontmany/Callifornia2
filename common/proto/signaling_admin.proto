@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package signaling_admin;
+
+// Internal admin API served by each signaling instance on a separate gRPC port.
+// Called only by the supervisor service; not exposed publicly.
+service SignalingAdminService {
+    // Liveness + lightweight metrics.
+    rpc Ping(PingRequest) returns (PingResponse);
+
+    // Notify all active WebSocket sessions about a dependency failure,
+    // best-effort delete their SFU peers, and clear local in-memory state
+    // (PeerRegistry, SessionRegistry, SFU client cache).
+    // Used when Redis or room_manager is determined down by the supervisor.
+    rpc Purge(PurgeRequest) returns (PurgeResponse);
+
+    // Close only the rooms on this signaling instance that are bound to the
+    // specified dead SFU instance.  Other rooms are left intact.
+    // Used when a single SFU instance fails.
+    rpc CloseRoomsBySfu(CloseRoomsBySfuRequest) returns (CloseRoomsBySfuResponse);
+}
+
+message PingRequest {}
+
+message PingResponse {
+    bool ok = 1;
+    // Current live WS connections tracked by this instance.
+    uint32 active_peers = 2;
+    // Session IDs currently registered in memory.
+    uint32 active_sessions = 3;
+    // Node ID in the form "host:port" matching the signaling:nodes ZSET member.
+    string node_id = 4;
+}
+
+message PurgeRequest {
+    // Human-readable reason forwarded to clients in ServiceUnavailable.
+    // Typical values: "redis", "room_manager".
+    string reason = 1;
+}
+
+message PurgeResponse {
+    bool ok = 1;
+    // How many rooms were purged on this instance.
+    uint32 rooms_closed = 2;
+}
+
+message CloseRoomsBySfuRequest {
+    // gRPC address of the dead SFU instance (matches sfu_grpc_addr in room bindings).
+    string sfu_grpc_addr = 1;
+    // Forwarded to clients in the RoomClosed message.
+    string reason = 2;
+}
+
+message CloseRoomsBySfuResponse {
+    bool ok = 1;
+    uint32 rooms_closed = 2;
+}

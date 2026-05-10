@@ -1,5 +1,6 @@
 #include "sfu_runtime.h"
 
+#include <algorithm>
 #include <utility>
 
 SfuRuntime::SfuRuntime(std::shared_ptr<EventRouter> eventRouter)
@@ -46,6 +47,11 @@ bool SfuRuntime::addPeer(const std::string& roomId,
         }
         return false;
     }
+
+    // Track this peer under its signalingId for bulk cleanup on stream cancel.
+    if (!signalingId.empty()) {
+        m_signalingPeers[signalingId].emplace_back(roomId, participantId);
+    }
     return true;
 }
 
@@ -76,8 +82,76 @@ bool SfuRuntime::removePeer(const std::string& roomId, const std::string& partic
         if (roomIt->second->peerCount() == 0) {
             m_rooms.erase(roomIt);
         }
+
+        // Remove from signaling index.
+        if (session) {
+            const auto& signalingId = session->signalingId();
+            auto idxIt = m_signalingPeers.find(signalingId);
+            if (idxIt != m_signalingPeers.end()) {
+                auto& vec = idxIt->second;
+                vec.erase(
+                    std::remove_if(vec.begin(), vec.end(),
+                                   [&](const auto& p) {
+                                       return p.first == roomId &&
+                                              p.second == participantId;
+                                   }),
+                    vec.end());
+                if (vec.empty()) {
+                    m_signalingPeers.erase(idxIt);
+                }
+            }
+        }
         return removed;
     }
+}
+
+int SfuRuntime::removePeersBySignaling(const std::string& signalingId) {
+    if (signalingId.empty()) {
+        return 0;
+    }
+
+    // Snapshot the list while holding the lock, then shut down peer connections
+    // outside the lock to avoid deadlocks with PeerSession callbacks.
+    std::vector<std::pair<std::string, std::string>> toRemove;
+    {
+        std::lock_guard lock(m_mutex);
+        auto idxIt = m_signalingPeers.find(signalingId);
+        if (idxIt == m_signalingPeers.end()) {
+            return 0;
+        }
+        toRemove = std::move(idxIt->second);
+        m_signalingPeers.erase(idxIt);
+    }
+
+    int removed = 0;
+    for (const auto& [roomId, participantId] : toRemove) {
+        std::shared_ptr<PeerSession> session;
+        {
+            std::lock_guard lock(m_mutex);
+            auto roomIt = m_rooms.find(roomId);
+            if (roomIt == m_rooms.end()) {
+                continue;
+            }
+            session = roomIt->second->findPeer(participantId);
+        }
+        if (session) {
+            session->shutdownPeerConnection();
+        }
+        {
+            std::lock_guard lock(m_mutex);
+            auto roomIt = m_rooms.find(roomId);
+            if (roomIt == m_rooms.end()) {
+                continue;
+            }
+            if (roomIt->second->removePeer(participantId)) {
+                ++removed;
+            }
+            if (roomIt->second->peerCount() == 0) {
+                m_rooms.erase(roomIt);
+            }
+        }
+    }
+    return removed;
 }
 
 std::shared_ptr<PeerSession> SfuRuntime::findPeerSession(const std::string& roomId,

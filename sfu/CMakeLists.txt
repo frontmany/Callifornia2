@@ -54,7 +54,7 @@ set(_GRPC_GRPCPP grpc++)
 # -----------------------------------------------------------------------------
 # signaling.proto -> C++ (package sfu; matches tonic::include_proto!(\"sfu\"))
 # -----------------------------------------------------------------------------
-get_filename_component(SFU_PROTO "${CMAKE_CURRENT_SOURCE_DIR}/../proto/signaling.proto" ABSOLUTE)
+get_filename_component(SFU_PROTO "${CMAKE_CURRENT_SOURCE_DIR}/../common/proto/signaling.proto" ABSOLUTE)
 get_filename_component(SFU_PROTO_DIR "${SFU_PROTO}" DIRECTORY)
 # Next to sources so IntelliSense/VS finds signaling.grpc.pb.h without guessing build dir.
 set(PROTO_GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated")

@@ -118,7 +118,7 @@ grpc::Status SfuServiceImpl::AddICECandidate(grpc::ServerContext* context,
 grpc::Status SfuServiceImpl::SubscribeEvents(grpc::ServerContext* context,
                                              const sfu::SubscribeEventsRequest* request,
                                              grpc::ServerWriter<sfu::SFUEvent>* writer) {
-    const std::string& signalingId = request->signaling_id();
+    const std::string signalingId = request->signaling_id();
     ABSL_LOG(INFO) << "SubscribeEvents signaling_id=" << signalingId;
 
     auto router = m_runtime->eventRouter();
@@ -131,6 +131,16 @@ grpc::Status SfuServiceImpl::SubscribeEvents(grpc::ServerContext* context,
     }
 
     router->unregisterSignaling(signalingId, sub);
+
+    // Primary cleanup: tear down all peers registered under this signaling node.
+    // This covers the case where the signaling process crashed without sending
+    // explicit DeletePeer RPCs.
+    const int removed = m_runtime->removePeersBySignaling(signalingId);
+    if (removed > 0) {
+        ABSL_LOG(WARNING) << "SubscribeEvents cancelled for signaling_id=" << signalingId
+                          << "; removed " << removed << " orphaned peer(s)";
+    }
+
     return grpc::Status::OK;
 }
 
