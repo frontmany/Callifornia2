@@ -1,0 +1,11 @@
+**/target
+# Host SFU CMake dir — CMakeCache has absolute paths; breaks Linux container build.
+sfu/build
+# Never send Windows/host vendor trees into the Linux image; vendor is populated in Dockerfile.
+sfu/vendor
+**/.git
+**/.vs
+**/node_modules
+**/*.md
+**/.env
+**/.env.*

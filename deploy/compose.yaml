@@ -1,0 +1,97 @@
+# Docker Compose v2 (plugin: `docker compose`). Run from repo root:
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
+# SFU is always built and run as the `sfu` service (C++/gRPC — first image build can take a long time).
+
+name: callifornia
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  sfu:
+    build:
+      context: ..
+      dockerfile: deploy/docker/sfu.Dockerfile
+      args:
+        # Lower (e.g. 2) if Docker runs out of memory during C++ link; raise on a beefy Linux builder.
+        BUILD_JOBS: 4
+        # GRPC_GIT_REF: v1.62.0
+        # LIBDATACHANNEL_GIT_REF: v0.21.2
+    restart: unless-stopped
+    environment:
+      SFU_GRPC_ADDR: 0.0.0.0:50051
+    ports:
+      - "50051:50051"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 180s
+
+  signaling:
+    build:
+      context: ..
+      dockerfile: deploy/docker/signaling.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      sfu:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/
+      SIGNALING_ADDR: 0.0.0.0:8080
+      SIGNALING_PUBLIC_HOST: ${PUBLIC_HOST}
+      SIGNALING_PUBLIC_PORT: "8080"
+      SIGNALING_ADMIN_GRPC_ADDR: 0.0.0.0:50071
+      CONNECTOR_TOKEN_SECRET: ${CONNECTOR_TOKEN_SECRET}
+    ports:
+      - "8080:8080"
+
+  connector:
+    build:
+      context: ..
+      dockerfile: deploy/docker/connector.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/
+      CONNECTOR_ADDR: 0.0.0.0:8090
+      CONNECTOR_TOKEN_SECRET: ${CONNECTOR_TOKEN_SECRET}
+      # id must equal signaling public_node_id = "${PUBLIC_HOST}:8080"
+      SIGNALING_INSTANCES: ${PUBLIC_HOST}:8080|ws://${PUBLIC_HOST}:8080/ws
+    ports:
+      - "8090:8090"
+
+  supervisor:
+    build:
+      context: ..
+      dockerfile: deploy/docker/supervisor.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      sfu:
+        condition: service_healthy
+      signaling:
+        condition: service_started
+    environment:
+      REDIS_URL: redis://redis:6379/
+      # node_id must match signaling public_node_id; gRPC uses the internal service name.
+      SIGNALING_ADMIN_INSTANCES: ${PUBLIC_HOST}:8080|http://signaling:50071
+      SUPERVISOR_SFU_INSTANCES: ${SUPERVISOR_SFU_INSTANCES}
+
+volumes:
+  redis-data:

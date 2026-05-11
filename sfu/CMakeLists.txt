@@ -98,8 +98,13 @@ target_link_libraries(sfu_grpc_proto PUBLIC
 )
 
 # -----------------------------------------------------------------------------
-# OpenSSL (Windows): prebuilt next to sfu — avoids system install for libSRTP / libjuice.
-# Supported layouts:
+# OpenSSL
+#
+# Linux / macOS / Docker: do not use sfu/vendor/openssl. libdatachannel (libsrtp, libjuice) resolves
+# OpenSSL via CMake FindOpenSSL against the system (e.g. Debian libssl-dev at build, libssl3 at runtime).
+# The SFU Docker image installs libssl-dev in the builder stage for consistent headers + pkg-config.
+#
+# Windows: prebuilt next to sfu avoids a system install for MSVC.
 #   sfu/vendor/openssl/          (bootstrap-openssl.ps1)
 #   sfu/vendor/OpenSSL-Win64/    (Shining Light installer / zip default name)
 # Download: https://slproweb.com/products/Win32OpenSSL.html — Win64 *full* (not Light).
