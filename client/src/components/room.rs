@@ -8,8 +8,8 @@ pub mod participant_tile;
 mod tiles;
 
 use crate::app::SettingsState;
-use crate::components::{ScreenShareDialog, SettingsPanel};
-use crate::screen_share_pick::{self, ScreenShareSource};
+use crate::components::SettingsPanel;
+use crate::screen_share_pick;
 use crate::theme::Theme;
 use gloo_timers::future::TimeoutFuture;
 use js_sys::Reflect;
@@ -84,9 +84,6 @@ pub struct RoomProps {
 pub fn Room(props: &RoomProps) -> Html {
     let is_settings_open = use_state(|| false);
     let screen_sharing = use_state(|| false);
-    let screen_share_dialog_open = use_state(|| false);
-    let screen_share_sources = use_state(|| Vec::<ScreenShareSource>::new());
-    let screen_share_sources_loading = use_state(|| false);
     let screen_share_stream = use_state(|| Option::<JsValue>::None);
     let copy_flash = use_state(|| false);
 
@@ -238,37 +235,15 @@ pub fn Room(props: &RoomProps) -> Html {
     };
 
     // ---------------------------------------------------------------------------
-    // Screen-share callbacks.
+    // Screen share: native getDisplayMedia only (no extra dialog).
     // ---------------------------------------------------------------------------
-
-    let close_screen_share_dialog = {
-        let screen_share_dialog_open = screen_share_dialog_open.clone();
-        Callback::from(move |_| screen_share_dialog_open.set(false))
-    };
-
-    let open_screen_share_dialog = {
-        let screen_share_dialog_open = screen_share_dialog_open.clone();
-        let screen_share_sources = screen_share_sources.clone();
-        let screen_share_sources_loading = screen_share_sources_loading.clone();
-        Callback::from(move |_| {
-            screen_share_dialog_open.set(true);
-            screen_share_sources.set(Vec::new());
-            screen_share_sources_loading.set(true);
-            let sources = screen_share_sources.clone();
-            let loading = screen_share_sources_loading.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let v = screen_share_pick::enumerate_screen_share_sources_for_dialog().await;
-                sources.set(v);
-                loading.set(false);
-            });
-        })
-    };
 
     let on_toggle_screen = {
         let screen_sharing = screen_sharing.clone();
         let screen_share_stream = screen_share_stream.clone();
-        let open_screen_share_dialog = open_screen_share_dialog.clone();
         let on_screen_share_stopped = props.on_screen_share_stopped.clone();
+        let on_screen_share_started = props.on_screen_share_started.clone();
+        let on_screen_share_error = props.on_screen_share_error.clone();
         Callback::from(move |_| {
             if *screen_sharing {
                 if let Some(stream) = screen_share_stream.as_ref() {
@@ -278,38 +253,23 @@ pub fn Room(props: &RoomProps) -> Html {
                 screen_share_stream.set(None);
                 screen_sharing.set(false);
             } else {
-                open_screen_share_dialog.emit(());
+                let screen_sharing = screen_sharing.clone();
+                let screen_share_stream = screen_share_stream.clone();
+                let started = on_screen_share_started.clone();
+                let error = on_screen_share_error.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    match screen_share_pick::start_display_capture().await {
+                        Ok(stream) => {
+                            started.emit(stream.clone());
+                            screen_share_stream.set(Some(stream));
+                            screen_sharing.set(true);
+                        }
+                        Err(err) => error.emit(err),
+                    }
+                });
             }
         })
     };
-
-    let on_screen_share_confirm = {
-        let screen_sharing = screen_sharing.clone();
-        let screen_share_stream = screen_share_stream.clone();
-        let screen_share_dialog_open = screen_share_dialog_open.clone();
-        let on_screen_share_started = props.on_screen_share_started.clone();
-        let on_screen_share_error = props.on_screen_share_error.clone();
-        Callback::from(move |source_id: String| {
-            let screen_sharing = screen_sharing.clone();
-            let screen_share_stream = screen_share_stream.clone();
-            let dialog_open = screen_share_dialog_open.clone();
-            let started = on_screen_share_started.clone();
-            let error = on_screen_share_error.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                match screen_share_pick::start_system_screen_share_for_stream(&source_id).await {
-                    Ok(stream) => {
-                        started.emit(stream.clone());
-                        screen_share_stream.set(Some(stream));
-                        screen_sharing.set(true);
-                        dialog_open.set(false);
-                    }
-                    Err(err) => error.emit(err),
-                }
-            });
-        })
-    };
-
-    // ---------------------------------------------------------------------------
     // Room-id copy callbacks.
     // ---------------------------------------------------------------------------
 
@@ -587,15 +547,6 @@ pub fn Room(props: &RoomProps) -> Html {
                 </div>
             }
 
-            if *screen_share_dialog_open {
-                <ScreenShareDialog
-                    sources={(*screen_share_sources).clone()}
-                    loading={*screen_share_sources_loading}
-                    on_share={on_screen_share_confirm}
-                    on_close={close_screen_share_dialog.clone()}
-                />
-            }
-
             if *is_settings_open {
                 <SettingsPanel
                     on_close={close_settings}
@@ -781,7 +732,7 @@ fn PresentationStage(props: &PresentationStageProps) -> Html {
             if props.media.is_some() {
                 <video
                     ref={video_ref}
-                    class="room-page__tile-video"
+                    class="room-page__presentation-video"
                     autoplay=true
                     playsinline=true
                     muted=true

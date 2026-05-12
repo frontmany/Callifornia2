@@ -470,6 +470,14 @@ async fn cleanup_connection(state: &State, context: &mut ConnectionContext) {
 
     if let Some(room_id) = session.room_id.as_deref() {
         leave_room_and_notify(state, room_id, &session.nickname, "signaling_disconnected").await;
+        if let Err(err) = redis::session_set_room(&state.redis, session_id, None).await {
+            warn!(
+                error = %err,
+                session_id = %session_id,
+                "failed to clear session room_id after signaling disconnect"
+            );
+        }
+        state.sessions.set_room(session_id, None).await;
     }
     if context.instance_load_registered {
         if let Err(err) =
@@ -478,12 +486,9 @@ async fn cleanup_connection(state: &State, context: &mut ConnectionContext) {
             warn!(error = %err, "failed to decrement signaling instance load");
         }
     }
-    if let Err(err) = redis::release_nick_lease(&state.redis, &session.nickname, session_id).await {
-        warn!(error = %err, nickname = %session.nickname, "failed to release nick lease");
-    }
-    if let Err(err) = redis::session_delete(&state.redis, session_id).await {
-        warn!(error = %err, session_id = %session_id, "failed to delete session");
-    }
+    // Do not release the nick or delete the connector session here: the same Redis
+    // `signaling:session:*` hash is shared with the connector; transport disconnect
+    // must not log the user out. Explicit `ClientMessage::Logout` still cleans up.
     state.sessions.remove(session_id).await;
 }
 

@@ -1,33 +1,10 @@
-//! Screen-share source enumeration and system capture. UI lives in [`crate::components::ScreenShareDialog`].
+//! Browser display capture via `getDisplayMedia`.
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
-/// One selectable **display** (monitor) in the screen-share dialog — not application windows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScreenShareSource {
-    pub id: String,
-    pub label: String,
-    pub width_px: u32,
-    pub height_px: u32,
-}
-
-/// Browsers do not expose monitor enumeration consistently before `getDisplayMedia`.
-/// Render one generic entry and let the native picker choose the actual display.
-pub async fn enumerate_screen_share_sources_for_dialog() -> Vec<ScreenShareSource> {
-    gloo_timers::future::TimeoutFuture::new(0).await;
-    vec![ScreenShareSource {
-        id: "browser-display-picker".to_string(),
-        label: "Choose a display".to_string(),
-        width_px: 16,
-        height_px: 9,
-    }]
-}
-
-/// Start sharing the surface chosen in the dialog using the OS/browser capture path.
-pub async fn start_system_screen_share_for_stream(source_id: &str) -> Result<JsValue, String> {
-    let _ = source_id;
+pub async fn start_display_capture() -> Result<JsValue, String> {
     let window = web_sys::window().ok_or_else(|| "Window is not available.".to_owned())?;
     let navigator = window.navigator();
     let media_devices = js_sys::Reflect::get(&navigator, &JsValue::from_str("mediaDevices"))

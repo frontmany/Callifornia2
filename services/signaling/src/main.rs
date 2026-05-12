@@ -29,7 +29,6 @@ use websocket::ws_upgrade;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
     init_tracing();
 
     let config = Config::from_env().with_context(|| "load config error")?;

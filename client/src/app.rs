@@ -160,6 +160,9 @@ pub fn App() -> Html {
         let app_error = app_error.clone();
         let media_error = media_error.clone();
         Callback::from(move |_| {
+            if let Some(sid) = (*session_id).clone() {
+                logout_best_effort(sid);
+            }
             session_id.set(None);
             signaling_ws_connected.set(false);
             signaling_start.set(None);
@@ -379,42 +382,33 @@ pub fn App() -> Html {
 
     {
         let session_id_value = (*session_id).clone();
-        let handoff_done = *handoff_complete;
-        use_effect_with(
-            (session_id_value, handoff_done),
-            move |(session_id, handoff_done)| {
-                let listener = if let Some(session_id) = session_id.clone() {
-                    if !*handoff_done {
-                        let listener_session_id = session_id.clone();
-                        let callback = Closure::wrap(Box::new(move |_event: Event| {
-                            logout_best_effort(listener_session_id.clone());
-                        })
-                            as Box<dyn FnMut(_)>);
-                        let window = web_sys::window().unwrap_throw();
-                        window
-                            .add_event_listener_with_callback(
-                                "pagehide",
-                                callback.as_ref().unchecked_ref(),
-                            )
-                            .unwrap_throw();
-                        Some((window, callback))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                move || {
-                    if let Some((window, callback)) = listener {
-                        let _ = window.remove_event_listener_with_callback(
-                            "pagehide",
-                            callback.as_ref().unchecked_ref(),
-                        );
-                        drop(callback);
-                    }
+        use_effect_with(session_id_value, move |session_id| {
+            let listener = if let Some(session_id) = session_id.clone() {
+                let listener_session_id = session_id.clone();
+                let callback = Closure::wrap(Box::new(move |_event: Event| {
+                    logout_best_effort(listener_session_id.clone());
+                }) as Box<dyn FnMut(_)>);
+                let window = web_sys::window().unwrap_throw();
+                window
+                    .add_event_listener_with_callback(
+                        "pagehide",
+                        callback.as_ref().unchecked_ref(),
+                    )
+                    .unwrap_throw();
+                Some((window, callback))
+            } else {
+                None
+            };
+            move || {
+                if let Some((window, callback)) = listener {
+                    let _ = window.remove_event_listener_with_callback(
+                        "pagehide",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                    drop(callback);
                 }
-            },
-        );
+            }
+        });
     }
 
     // ── WebRTC session lifecycle ──────────────────────────────────────────────

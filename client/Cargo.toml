@@ -19,7 +19,7 @@ web-sys = { version = "0.3.97", features = [
   "MediaStreamTrack", "MessageEvent", "Navigator", "ResizeObserver",
   "RtcConfiguration", "RtcIceCandidate", "RtcIceServer",
   "RtcPeerConnection", "RtcPeerConnectionIceEvent", "RtcRtpSender",
-  "RtcSdpType", "RtcSessionDescriptionInit", "RtcTrackEvent",
+  "RtcSdpType", "RtcSessionDescriptionInit", "RtcTrackEvent", "MediaStreamTrack",
   "WebSocket", "Window",
 ] }
 yew = { version = "0.23.0", features = ["csr"] }

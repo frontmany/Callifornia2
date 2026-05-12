@@ -18,7 +18,6 @@ use crate::probes::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
     init_tracing();
 
     let config = Arc::new(Config::from_env().context("load supervisor config")?);

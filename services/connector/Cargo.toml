@@ -7,12 +7,12 @@ edition = "2021"
 anyhow = "1"
 axum = "0.8"
 control_store = { path = "../../common/control_store" }
-dotenv = "0.15"
-jsonwebtoken = { version = "10.3.0", features = ["hmac"] }
+jsonwebtoken = { version = "10.3.0", features = ["hmac", "rust_crypto"] }
 redis = { version = "1.2", features = ["tokio-comp", "connection-manager"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2.0"
 tokio = { version = "1.51", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tower-http = { version = "0.5", features = ["cors"] }
 uuid = { version = "1.23", features = ["v4", "serde"] }

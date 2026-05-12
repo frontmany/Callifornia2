@@ -456,11 +456,11 @@ html.dark .room-page__screen-btn--inactive .room-page__screen-icon {
     min-height: 0;
 }
 
-/* Screen share: gutters for left toolbar + right rail; main uses space between. */
+/* Screen share: gutters for left toolbar + right rail. */
 .room-page--presentation {
-    --presentation-gutter-left: 118px;
-    --presentation-gutter-right: 206px;
-    --presentation-v-pad: 44px;
+    --presentation-gutter-left: 124px;
+    --presentation-gutter-right: 212px;
+    --presentation-v-pad: 52px;
 }
 
 .room-page--presentation .room-page__main {
@@ -495,17 +495,20 @@ html.dark .room-page__screen-btn--inactive .room-page__screen-icon {
     padding-right: var(--presentation-gutter-right);
     padding-top: 12px;
     padding-bottom: 12px;
+    overflow: hidden;
 }
 
 .room-page__presentation-placeholder {
     width: 100%;
-    max-width: min(100%, calc((100vh - 200px) * 16 / 9));
-    aspect-ratio: 16 / 9;
-    max-height: calc(100vh - 200px);
+    max-width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    max-height: min(calc(100dvh - var(--presentation-v-pad)), calc(100vh - var(--presentation-v-pad)));
     margin: 0 auto;
     border-radius: 14px;
     border: 1px solid color-mix(in srgb, var(--card-border) 84%, transparent);
-    background: transparent;
+    background: color-mix(in srgb, var(--card-bg) 40%, #0a0a0b);
     box-sizing: border-box;
     overflow: hidden;
     display: flex;
@@ -513,18 +516,19 @@ html.dark .room-page__screen-btn--inactive .room-page__screen-icon {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 24px 16px;
+    padding: 12px;
     text-align: center;
 }
 
-.room-page--presentation .room-page__presentation-placeholder {
-    max-width: min(
-        100%,
-        calc((100dvh - var(--presentation-v-pad)) * 16 / 9),
-        calc((100vh - var(--presentation-v-pad)) * 16 / 9)
-    );
-    max-height: calc(100vh - var(--presentation-v-pad));
-    max-height: calc(100dvh - var(--presentation-v-pad));
+.room-page__presentation-video {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    background: #0a0a0b;
+    border-radius: 10px;
 }
 
 .room-page__presentation-label {
@@ -549,7 +553,7 @@ html.dark .room-page__screen-btn--inactive .room-page__screen-icon {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    z-index: 2;
+    z-index: 30;
     pointer-events: auto;
 }
 
@@ -641,9 +645,9 @@ html.dark .room-page__tile--rail {
     }
 
     .room-page--presentation {
-        --presentation-gutter-left: 100px;
-        --presentation-gutter-right: 196px;
-        --presentation-v-pad: 36px;
+        --presentation-gutter-left: 108px;
+        --presentation-gutter-right: 200px;
+        --presentation-v-pad: 40px;
     }
 
     .room-page--presentation .room-page__main {

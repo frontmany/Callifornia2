@@ -22,39 +22,45 @@ pub struct ParticipantTileProps {
 }
 
 /// Wraps a [`MediaStream`](web_sys::MediaStream) for [`RoomProps::participant_media`](super::RoomProps::participant_media).
-#[allow(dead_code)] // Wired from `App` once remote/local streams are tracked.
+#[allow(dead_code)]
 pub fn media_stream_js(stream: web_sys::MediaStream) -> JsValue {
     stream.into()
+}
+
+fn media_stream_has_video(media: &Option<JsValue>) -> bool {
+    let Some(js) = media.as_ref() else {
+        return false;
+    };
+    let Ok(stream) = js.clone().dyn_into::<web_sys::MediaStream>() else {
+        return false;
+    };
+    stream.get_video_tracks().length() > 0
 }
 
 #[function_component]
 pub fn ParticipantTile(props: &ParticipantTileProps) -> Html {
     let video_ref = use_node_ref();
+    let has_video = media_stream_has_video(&props.media);
 
     {
         let video_ref = video_ref.clone();
         let media = props.media.clone();
         let mute_audio = props.mute_audio;
-        use_effect_with(
-            (media, mute_audio),
-            move |(media, mute_audio): &(Option<JsValue>, bool)| {
-                if let Some(video_el) = video_ref.cast::<HtmlVideoElement>() {
-                    let _ = video_el.set_muted(*mute_audio);
-                    match media
-                        .as_ref()
-                        .and_then(|j| j.clone().dyn_into::<web_sys::MediaStream>().ok())
-                    {
-                        Some(ms) => {
-                            let _ = video_el.set_src_object(Some(&ms));
-                        }
-                        None => {
-                            let _ = video_el.set_src_object(None);
-                        }
-                    }
+        use_effect_with((media.clone(), mute_audio), move |(media, mute_audio)| {
+            let has_video = media_stream_has_video(media);
+            if let Some(video_el) = video_ref.cast::<HtmlVideoElement>() {
+                let _ = video_el.set_muted(*mute_audio);
+                if !has_video {
+                    let _ = video_el.set_src_object(None);
+                } else if let Some(ms) = media
+                    .as_ref()
+                    .and_then(|j| j.clone().dyn_into::<web_sys::MediaStream>().ok())
+                {
+                    let _ = video_el.set_src_object(Some(&ms));
                 }
-                || ()
-            },
-        );
+            }
+            || ()
+        });
     }
 
     let label = truncate_str(&props.name, MAX_NAME_CHARS);
@@ -63,7 +69,6 @@ pub fn ParticipantTile(props: &ParticipantTileProps) -> Html {
         w = props.width_px,
         h = props.height_px
     );
-    let has_video = props.media.is_some();
 
     html! {
         <div

@@ -8,10 +8,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use axum::extract::State as AxumState;
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use message::{
     AuthRequest, AuthResponse, CreateRequest, ErrorResponse, JoinRequest, LogoutRequest,
     ServerErrorCode, SessionRenewRequest, SignalingReadyResponse,
@@ -44,7 +45,6 @@ enum HandlerError {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
     init_tracing();
 
     let config = Arc::new(Config::from_env().context("load config")?);
@@ -56,9 +56,12 @@ async fn main() -> Result<()> {
 
     let redis = redis::init_redis(&config.redis_url, config.redis_connect_timeout).await?;
     redis::set_op_timeout(config.redis_op_timeout);
-    let state = State { config, redis };
+    let state = State {
+        config: config.clone(),
+        redis,
+    };
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/auth", post(auth))
         .route("/create", post(create))
         .route("/join", post(join))
@@ -66,6 +69,10 @@ async fn main() -> Result<()> {
         .route("/session/renew", post(session_renew))
         .route("/health", get(health))
         .with_state(state);
+
+    if let Some(layer) = cors_layer(&config.cors_allowed_origins) {
+        app = app.layer(layer);
+    }
 
     info!(%socket_addr, "Connector server started");
 
@@ -78,6 +85,27 @@ async fn main() -> Result<()> {
         .await
         .context("run connector server")?;
     Ok(())
+}
+
+fn cors_layer(origins: &[String]) -> Option<CorsLayer> {
+    if origins.is_empty() {
+        return None;
+    }
+    let values: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|origin| HeaderValue::from_str(origin.trim()).ok())
+        .collect();
+    if values.is_empty() {
+        return None;
+    }
+
+    Some(
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(values))
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([header::CONTENT_TYPE])
+            .max_age(std::time::Duration::from_secs(600)),
+    )
 }
 
 fn init_tracing() {

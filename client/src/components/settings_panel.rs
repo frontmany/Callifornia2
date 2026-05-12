@@ -58,6 +58,27 @@ pub fn SettingsPanel(props: &SettingsPanelProps) -> Html {
         });
     }
 
+    let camera_default_done = use_mut_ref(|| false);
+    {
+        let catalog = catalog.clone();
+        let on_cam = props.on_camera_device_change.clone();
+        let selected = props.selected_camera_device_id.clone();
+        let done = camera_default_done.clone();
+        use_effect_with((*catalog).clone(), move |cat: &DeviceCatalog| {
+            if *done.borrow() {
+                return;
+            }
+            let Some(first) = cat.cameras.first() else {
+                return;
+            };
+            let sel = selected.trim();
+            if sel.is_empty() || sel.eq_ignore_ascii_case("default") {
+                on_cam.emit(first.id.clone());
+            }
+            *done.borrow_mut() = true;
+        });
+    }
+
     let on_input_level = on_level_input(props.on_input_level_change.clone());
     let on_output_level = on_level_input(props.on_output_level_change.clone());
 

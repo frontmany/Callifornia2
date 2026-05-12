@@ -22,6 +22,8 @@ pub struct Config {
     /// How many seconds since supervisor heartbeat before rejecting /create.
     pub supervisor_stale_sec: u64,
     pub signaling_instances: Vec<SignalingInstance>,
+    /// Comma-separated list of browser origins allowed by CORS.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl Config {
@@ -44,6 +46,7 @@ impl Config {
             "SIGNALING_INSTANCES",
             "127.0.0.1:8080|ws://127.0.0.1:8080/ws",
         ))?;
+        let cors_allowed_origins = parse_csv_list_env("CONNECTOR_CORS_ALLOWED_ORIGINS");
 
         Ok(Self {
             connector_addr,
@@ -56,6 +59,7 @@ impl Config {
             signaling_stale_timeout,
             supervisor_stale_sec,
             signaling_instances,
+            cors_allowed_origins,
         })
     }
 
@@ -84,6 +88,15 @@ fn parse_signaling_instances(value: &str) -> Result<Vec<SignalingInstance>> {
 
 fn get_env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_owned())
+}
+
+fn parse_csv_list_env(key: &str) -> Vec<String> {
+    env::var(key)
+        .unwrap_or_default()
+        .split(',')
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 fn duration_from_env(key: &str, default_ms: u64) -> Result<Duration> {
